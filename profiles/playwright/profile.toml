@@ -2,15 +2,17 @@ name        = "playwright"
 summary     = "Playwright with Chromium, for browser tests and screenshots"
 description = """
 Installs Playwright and its Chromium build with the system libraries it needs. This is the \
-heavy profile: its setup takes minutes on a fresh Sprite, where restoring a checkpoint takes \
-under a second, which is the case for being able to start a new Sprite from a checkpoint."""
+heavy profile: its setup takes about a minute on a fresh Sprite, where restoring a checkpoint \
+takes seconds, which is the case for being able to start a new Sprite from a checkpoint."""
 timeout     = "20m"
 
 [policy]
-# npm comes with the defaults; the browser download comes from Playwright's CDN.
-# Untested: milestone M3 confirms whether the system packages need more domains.
+# Measured (docs/RESULTS.md): npm and the Ubuntu archive come with the defaults; Chromium
+# downloads from Playwright's CDN; example.com is the page setup.sh's smoke test loads.
+# Without the last rule the smoke test fails with net::ERR_NAME_NOT_RESOLVED. A site you
+# test needs its own allow rule: put it in your own profile and the policies combine.
 rules = [
   { include = "defaults" },
   { action = "allow", domain = "cdn.playwright.dev" },
-  { action = "allow", domain = "playwright.download.prss.microsoft.com" },
+  { action = "allow", domain = "example.com" },
 ]

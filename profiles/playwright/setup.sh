@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Untested: written before the launcher exists; first run on a Sprite is milestone M3,
-# where its time on a fresh Sprite is measured.
+# Measured on fresh Sprites in milestone M3: see docs/RESULTS.md.
 # Idempotent: npm and Playwright skip what is already installed.
 set -euo pipefail
 
@@ -8,3 +7,6 @@ npm install -g playwright
 npx playwright install --with-deps chromium
 
 echo "playwright: $(npx playwright --version)"
+
+# Prove Chromium starts headless and the network policy lets it load a page.
+NODE_PATH="$(npm root -g)" node "$HOME/.config/profiled/playwright/smoke.js" https://example.com
