@@ -4,7 +4,7 @@ defmodule SpriteProfiles.MergeTest do
 
   import SpriteProfiles.ProfileHelpers
 
-  alias SpriteProfiles.{Merge, Plan, Profile}
+  alias SpriteProfiles.{Merge, Plan}
 
   defp merge!(profiles, opts \\ []) do
     {:ok, plan} = Merge.merge(profiles, opts)
