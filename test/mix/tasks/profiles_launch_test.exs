@@ -49,6 +49,11 @@ defmodule Mix.Tasks.Profiles.LaunchTest do
     refute out =~ "sk-test-not-real"
   end
 
+  test "the record path is shown relative to home" do
+    assert Launch.home_relative(Path.expand("~/.local/state/x.json")) == "~/.local/state/x.json"
+    assert Launch.home_relative("/elsewhere/x.json") == "/elsewhere/x.json"
+  end
+
   test "a refused set exits 1 before any Sprite call" do
     assert catch_exit(Launch.run(["-p", "preview", "-p", "preview"])) == {:shutdown, 1}
     assert output() =~ "[duplicate_pick]"

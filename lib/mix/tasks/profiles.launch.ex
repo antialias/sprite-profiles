@@ -177,7 +177,20 @@ defmodule Mix.Tasks.Profiles.Launch do
     Checkpoint: #{record.checkpoint || "(none)"}  "profiled: #{record.set}"
     Per profile: #{Enum.join(setup, "; ")}
     Total:      #{seconds(record.total_ms) |> String.trim()}
-    Record:     #{record.record_path}\
+    Record:     #{home_relative(record.record_path)}\
     """)
+  end
+
+  # Shown as ~/... so a pasted or recorded launch does not carry the local user name.
+  @doc false
+  def home_relative(nil), do: nil
+
+  def home_relative(path) do
+    home = Path.expand("~")
+
+    case Path.relative_to(path, home) do
+      ^path -> path
+      rel -> Path.join("~", rel)
+    end
   end
 end
