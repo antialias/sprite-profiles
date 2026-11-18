@@ -10,8 +10,25 @@ explicit rules: union where that is safe, a refusal in plain words where two of 
 disagree.
 
 **Status: work in progress.** The profile format, the merge rules, `mix profiles.plan` and
-`mix profiles.launch` (create a real Sprite and apply a set to it) work today. The MCP server
-for agents and the web catalogue are next.
+`mix profiles.launch` (create a real Sprite and apply a set to it) work today, and the example
+profiles have been measured on real Sprites ([docs/RESULTS.md](docs/RESULTS.md)). The MCP
+server for agents and the web catalogue are next.
+
+## What it looks like
+
+[docs/launch.cast](docs/launch.cast) is a terminal recording (play it with
+`asciinema play docs/launch.cast`): an agent is refused a privileged set, then a person
+launches `claude-code + playwright`, headless Chromium loads a page inside the new Sprite,
+and the `profiled` checkpoint is listed. The Sprite URL's org suffix is masked in it.
+
+| set | total | of which |
+|---|---:|---|
+| `claude-code + anthropic-key` | 6.7 s | the key applied after the 0.4 s checkpoint |
+| `claude-code + preview` | 11.8 s | creating the service, 5.4 s |
+| `claude-code + playwright` | 49-65 s | Playwright's setup, 36-53 s; restoring its checkpoint takes 3.9 s |
+
+The heavy setup is paid by every new Sprite, because a checkpoint can only be restored into
+the Sprite that took it. Starting a Sprite from a checkpoint would make it a restore.
 
 ## Try it
 
@@ -75,16 +92,19 @@ mix profiles.plan -p claude-code -p my-model --dir profiles --dir ~/my-profiles
 |---|---|
 | `claude-code` | Claude Code ready to work unattended: hooks that keep the Sprite awake mid-turn, a pre-trusted `~/work`, an MCP server that needs no sign-in |
 | `github` | GitHub through Fly's connector gateway, with no token in the Sprite |
-| `playwright` | the heavy one: a browser install that takes minutes |
+| `playwright` | the heavy one: a browser install that takes most of a minute, then a headless page load to prove it |
 | `anthropic-key` | privileged: an Anthropic API key, read from your machine at launch |
 | `preview` | a static-file service on the Sprite's URL |
 
-`claude-code` and `preview` have been applied to fresh Sprites. `github` needs a GitHub
-connector in your org; `playwright` and `anthropic-key` are measured next.
+`claude-code`, `preview`, `playwright` and `anthropic-key` (with a dummy key) have been
+applied to fresh Sprites; see [docs/RESULTS.md](docs/RESULTS.md). `github` needs a GitHub
+connector in your org whose access policy names `profile:github`; without one the launch is
+refused before anything is created.
 
 ## Read more
 
 - [docs/SPEC.md](docs/SPEC.md): the profile format and the merge rules.
+- [docs/RESULTS.md](docs/RESULTS.md): each example set's step timings on real Sprites.
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to contribute, and what must never be committed.
 
 ## License

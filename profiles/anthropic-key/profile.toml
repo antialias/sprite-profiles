@@ -4,8 +4,8 @@ description = """
 Puts an Anthropic API key in the Sprite's env so Claude Code runs without a claude.ai \
 sign-in. Privileged: an agent may not launch a set that holds it, and it is applied after \
 the profiled checkpoint, so the key is never saved in a checkpoint. The launcher reads the \
-key on the launching machine from ~/.config/sprite-profiles/secrets/ANTHROPIC_API_KEY; it \
-is never in this repository."""
+key on the launching machine from ~/.config/sprite-profiles/secrets/ANTHROPIC_API_KEY, or \
+from the folder --secrets-dir names; it is never in this repository."""
 privileged  = true
 
 [env]
