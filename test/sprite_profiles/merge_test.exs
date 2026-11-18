@@ -105,6 +105,29 @@ defmodule SpriteProfiles.MergeTest do
       assert Merge.check_connectors(plan, available) == :ok
     end
 
+    test "a policy admits only when the Sprite carries all its labels and matches its prefix" do
+      labels = ["profile:github", "team:a"]
+
+      assert Merge.admits?(%{sprite_labels: ["profile:github", "team:a"]}, labels, "x")
+      refute Merge.admits?(%{sprite_labels: ["profile:github", "team:b"]}, labels, "x")
+      assert Merge.admits?(%{name_prefix: "sp-"}, labels, "sp-1")
+      refute Merge.admits?(%{name_prefix: "sp-"}, labels, "other")
+      refute Merge.admits?(%{name_prefix: "sp-"}, labels, nil)
+      refute Merge.admits?(%{sprite_labels: ["profile:github"], name_prefix: "sp-"}, labels, "x")
+      assert Merge.admits?(%{allow_all: true, sprite_labels: ["nope"]}, labels, "x")
+      refute Merge.admits?(%{sprite_labels: [], name_prefix: nil}, labels, "x")
+    end
+
+    test "check_connectors uses the Sprite's name for a prefix policy", %{plan: plan} do
+      available = [
+        %{provider: "github", name_prefix: "ci-"},
+        %{provider: "slack", allow_all: true}
+      ]
+
+      assert Merge.check_connectors(plan, available, %{}, name: "ci-1") == :ok
+      assert {:error, [_]} = Merge.check_connectors(plan, available, %{}, name: "dev-1")
+    end
+
     test "missing, or present but not admitting the labels, is connector_missing", %{plan: plan} do
       available = [%{provider: "github", sprite_labels: ["profile:other"]}]
 

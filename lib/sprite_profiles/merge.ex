@@ -471,22 +471,19 @@ defmodule SpriteProfiles.Merge do
   Checks the plan's connectors against the org's. Pure: the launcher fetches `available`
   from the Sprites API and passes it in.
 
-  Each available connector is a map with `:provider`, and either `allow_all: true` or
-  `sprite_labels: [...]`; it admits the Sprite when `allow_all` is set or one of its labels
-  is among the plan's labels. `setup_urls` maps providers to the URL where one is set up.
+  Each available connector is a map with `:provider` and its access policy: `allow_all`,
+  `sprite_labels` and `name_prefix`, as the Sprites API gives them. See `admits?/3`.
+  `setup_urls` maps providers to the URL where one is set up. Option `name:` is the
+  Sprite's name, for a policy with a name prefix.
   """
-  @spec check_connectors(Plan.t(), [map()], %{optional(String.t()) => String.t()}) ::
+  @spec check_connectors(Plan.t(), [map()], %{optional(String.t()) => String.t()}, keyword()) ::
           :ok | {:error, [Refusal.t()]}
-  def check_connectors(%Plan{} = plan, available, setup_urls \\ %{}) do
+  def check_connectors(%Plan{} = plan, available, setup_urls \\ %{}, opts \\ []) do
+    name = Keyword.get(opts, :name)
+
     refusals =
       Enum.flat_map(plan.connectors, fn %{provider: provider, profiles: owners} ->
-        admits? = fn c ->
-          c.provider == provider and
-            (Map.get(c, :allow_all, false) or
-               Enum.any?(Map.get(c, :sprite_labels, []), &(&1 in plan.labels)))
-        end
-
-        if Enum.any?(available, admits?) do
+        if Enum.any?(available, &(&1.provider == provider and admits?(&1, plan.labels, name))) do
           []
         else
           where =
@@ -513,4 +510,27 @@ defmodule SpriteProfiles.Merge do
 
     if refusals == [], do: :ok, else: {:error, refusals}
   end
+
+  @doc """
+  True when a connector's access policy admits a Sprite with `labels` and `name`, by the
+  Sprites rule: `allow_all` admits every Sprite; otherwise the Sprite must carry **all** of
+  `sprite_labels` and its name must start with `name_prefix`, for whichever of the two the
+  policy sets. A policy that sets neither admits no Sprite (the connector is dormant).
+  """
+  @spec admits?(map(), [String.t()], String.t() | nil) :: boolean()
+  def admits?(connector, labels, name) do
+    wanted = Map.get(connector, :sprite_labels) || []
+    prefix = Map.get(connector, :name_prefix)
+    prefix = if prefix in [nil, ""], do: nil, else: prefix
+
+    cond do
+      Map.get(connector, :allow_all, false) -> true
+      wanted == [] and prefix == nil -> false
+      true -> Enum.all?(wanted, &(&1 in labels)) and prefix_ok?(prefix, name)
+    end
+  end
+
+  defp prefix_ok?(nil, _name), do: true
+  defp prefix_ok?(prefix, name) when is_binary(name), do: String.starts_with?(name, prefix)
+  defp prefix_ok?(_prefix, nil), do: false
 end

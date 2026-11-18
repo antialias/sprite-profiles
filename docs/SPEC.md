@@ -114,7 +114,7 @@ union where that is safe, refusal where two profiles disagree. Nothing is picked
 |---|---|---|
 | `env` | union; a key two profiles define is refused, **even with the same value** | `env_collision` |
 | `policy.rules` | union, deduplicated; `include = "defaults"` at most once; every `deny` before every `allow`, so a deny in any profile wins. No profile declares a policy: none is set (the Sprite's default, unrestricted). One does: the union is set, so a profile that needs the network must say so | |
-| `connectors` | union by provider. At launch, each must match an org connector whose access policy admits one of this Sprite's labels (or allows all) | `connector_missing` |
+| `connectors` | union by provider. At launch, each must match an org connector whose access policy admits this Sprite: it allows all Sprites, or this Sprite carries **all** the labels it lists and its name starts with the name prefix it sets (whichever of the two it sets; a policy with neither admits nothing) | `connector_missing` |
 | `labels` | `profile:<name>` for every pick, then declared labels, deduplicated. So a connector is granted to a *profile*: a GitHub connector whose policy names `profile:github` admits exactly the Sprites carrying that profile | |
 | `services` | union; the same name twice is refused; two services with `http_port` are refused, since a Sprite routes its URL to one service | `service_collision`, `http_port_conflict` |
 | `claude.mcp_servers` | union; the same name twice is refused. An `http`/`sse` server with no `Authorization` header and no `auth = "none"`, or any server needing env the set does not define, is refused before a Sprite is created: an unattended Sprite cannot answer a sign-in | `mcp_server_collision`, `mcp_needs_login` |
