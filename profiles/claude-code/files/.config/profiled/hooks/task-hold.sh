@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Claude Code hook: hold a Sprites Task while a turn runs, release it when Claude stops.
 # A Sprite pauses about 30 s after output stops, even mid-job, unless a Task holds it.
-# `hold` creates the Task or extends it by 5 minutes; `release` deletes it.
-# Untested until milestone M2. A hook must never block Claude, so this always exits 0.
+# `hold` creates the Task or extends it by 5 minutes (PUT does both; POST is a fallback);
+# `release` deletes it. Both were run by hand on a Sprite in M2; a hook firing in a real
+# Claude turn is checked in M3. A hook must never block Claude, so this always exits 0.
 name="claude-turn"
 case "${1:-}" in
   hold)

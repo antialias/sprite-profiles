@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Untested: written before the launcher exists; first run on a Sprite is milestone M2.
+# Run on a fresh Sprite by `mix profiles.launch` (milestone M2).
 # Idempotent: safe to run again.
 set -euo pipefail
 

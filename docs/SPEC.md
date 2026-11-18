@@ -158,3 +158,40 @@ profile involved and says what to change:
 | `bad_skill` | a skill that is not a folder, has a bad name, or has no `SKILL.md` |
 | `bad_file` | a symlink or special file under `files/` or a skill |
 | `unknown_entry` | anything in `claude/` other than `skills/` |
+
+## Launching a set
+
+`mix profiles.launch` (`SpriteProfiles.Launcher`) turns a plan into a Sprite. A launcher in
+another language should do the same, in this order:
+
+1. **Resolve locally.** Merge the set and refuse before any API call. Two more refusals
+   exist here: `secret_missing` (a privileged profile's secret is not on the launching
+   machine) and `bad_sprite_name`.
+2. **Check connectors**, only when the set declares one: list the org's connectors and
+   apply the access-policy rule in the merge table. A refusal here creates nothing.
+3. **Create the Sprite with its labels** in the create request, then confirm them from the
+   answer. If they did not stick, set the whole list again and read it back.
+4. **Set the network policy**, when the plan has one. It can only be set from outside the
+   Sprite.
+5. **Apply each profile**, in plan order. The env file `~/.config/profiled/env.sh` (0600,
+   sourced from `~/.bashrc`) is written at the start of each phase: before the checkpoint
+   it holds the checkpointed profiles' env, after it everyone's. Then, per profile:
+   - push `files/` and skills, with modes 0644 or 0755;
+   - lay its `claude.settings` over the Sprite's `~/.claude/settings.json` (combining lists
+     append, other leaves replace the image's);
+   - register its MCP servers with `claude mcp add-json --scope user`, replacing any of the
+     same name;
+   - run `setup.sh` under a Sprites Task hold named `profiled-setup-<profile>`, extended
+     every 60 s and released when the script ends, within its `timeout`, with
+     `PROFILED_PROFILE`, `PROFILED_SET` and the env file loaded;
+   - create its services (`~` in `dir` is expanded). Services come after `setup.sh`, so a
+     service may run what the script installed.
+6. **Checkpoint** with the comment `profiled: <set>`.
+7. **Apply the privileged and `checkpoint = false` profiles** the same way. They are never in
+   a checkpoint.
+8. **Record** the launch: the steps with their times, the labels and how they were set, the
+   policy, the env keys (never values) and the checkpoint id, as JSON under
+   `~/.local/state/sprite-profiles/launches/`.
+
+A failed step stops the launch. The Sprite is left for inspection unless
+`--destroy-on-failure` was given.

@@ -1,0 +1,174 @@
+defmodule Mix.Tasks.Profiles.Launch do
+  @shortdoc "Creates a Sprite and applies a set of profiles to it"
+
+  @moduledoc """
+  Creates a Fly.io Sprite, applies a set of profiles to it, checkpoints it as
+  `profiled: <set>`, then applies privileged profiles. Prints each step's time as it goes and
+  writes a launch record under `~/.local/state/sprite-profiles/launches/`.
+
+      mix profiles.launch --profile claude-code --profile preview --name demo-1
+      mix profiles.launch -p claude-code -p github --dry-run
+      mix profiles.launch -p claude-code -p anthropic-key --destroy-on-failure
+
+  Options:
+
+    * `--profile`, `-p` - a profile to pick; repeat it, in the order to apply them
+    * `--name` - the Sprite's name (default: the picks joined by '-', then 4 hex digits)
+    * `--dry-run` - resolve the set and print the plan; create nothing
+    * `--destroy-on-failure` - destroy the Sprite if a step after its creation fails
+    * `--dir` - the folder holding the profiles (default `profiles`)
+    * `--adapter` - `cli` (default: the installed, logged-in `sprite` CLI) or `api` (REST
+      with `SPRITES_TOKEN`)
+
+  Secrets for privileged profiles are read from `~/.config/sprite-profiles/secrets/<NAME>`.
+  Exits 1 when the set is refused or a step fails, 2 on bad usage.
+  """
+
+  use Mix.Task
+
+  alias SpriteProfiles.{Launcher, Plan, Sprites}
+
+  @switches [
+    profile: :keep,
+    name: :string,
+    dry_run: :boolean,
+    destroy_on_failure: :boolean,
+    dir: :string,
+    adapter: :string
+  ]
+  @aliases [p: :profile]
+
+  @impl Mix.Task
+  def run(argv) do
+    Mix.Task.run("compile", [])
+    Mix.Task.run("loadpaths", [])
+    Application.ensure_all_started(:req)
+
+    case OptionParser.parse(argv, strict: @switches, aliases: @aliases) do
+      {opts, [], []} ->
+        names = Keyword.get_values(opts, :profile)
+        if opts[:dry_run], do: dry_run(names, opts), else: launch(names, opts)
+
+      {_, args, invalid} ->
+        usage_error(Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " "))
+    end
+  end
+
+  defp usage_error(extra) do
+    Mix.shell().error(
+      "usage: mix profiles.launch --profile NAME [--profile NAME ...] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR] [--adapter cli|api]" <>
+        if(extra == "", do: "", else: "\nnot understood: " <> extra)
+    )
+
+    exit({:shutdown, 2})
+  end
+
+  defp dry_run(names, opts) do
+    case Launcher.resolve(names, resolve_opts(opts)) do
+      {:ok, plan, _profiles, _secrets} ->
+        Mix.shell().info(Plan.format(plan))
+        Mix.shell().info("Dry run: nothing was created.")
+
+      {:error, problems} ->
+        refused(problems)
+    end
+  end
+
+  defp launch(names, opts) do
+    sprites = sprites(opts[:adapter] || "cli")
+
+    launch_opts =
+      resolve_opts(opts) ++
+        [
+          sprites: sprites,
+          destroy_on_failure: opts[:destroy_on_failure] || false,
+          on_step: &print_step/1
+        ]
+
+    Mix.shell().info("Launching #{Enum.join(names, " + ")}")
+
+    case Launcher.launch(names, launch_opts) do
+      {:ok, record} ->
+        summary(record)
+
+      {:error, %{outcome: :failed} = record} ->
+        summary(record)
+        Mix.shell().error("Failed at #{step_name(record.error)}: #{record.error.message}")
+
+        unless opts[:destroy_on_failure] or record.steps == [] do
+          Mix.shell().error(
+            "The Sprite #{record.name} was left as it is; destroy it with: sprite destroy --force #{record.name}"
+          )
+        end
+
+        exit({:shutdown, 1})
+
+      {:error, problems} ->
+        refused(problems)
+    end
+  end
+
+  defp resolve_opts(opts) do
+    [dir: Keyword.get(opts, :dir, "profiles"), name: opts[:name], caller: :person]
+  end
+
+  defp sprites("cli"), do: Sprites.new(Sprites.Cli, [])
+
+  defp sprites("api") do
+    case Sprites.Api.from_env() do
+      {:ok, cfg, var} ->
+        Mix.shell().info("Using the Sprites API with the token in #{var}.")
+        Sprites.new(Sprites.Api, cfg)
+
+      {:error, message} ->
+        Mix.shell().error(message)
+        exit({:shutdown, 2})
+    end
+  end
+
+  defp sprites(other), do: usage_error("--adapter #{other}")
+
+  defp refused(problems) do
+    Mix.shell().error("Refused:")
+    Enum.each(problems, &Mix.shell().error("  [#{&1.code}] #{&1.message}"))
+    exit({:shutdown, 1})
+  end
+
+  defp print_step(s) do
+    mark = if s.outcome == :ok, do: " ", else: "!"
+
+    Mix.shell().info(
+      "#{mark} #{String.pad_trailing(step_name(s), 26)} #{seconds(s.ms)}  #{one_line(s.detail)}"
+    )
+  end
+
+  defp step_name(%{step: step, profile: nil}), do: to_string(step)
+  defp step_name(%{step: step, profile: p}), do: "#{step} #{p}"
+
+  defp seconds(ms),
+    do: String.pad_leading(:erlang.float_to_binary(ms / 1000, decimals: 2), 7) <> " s"
+
+  defp one_line(nil), do: ""
+
+  defp one_line(text),
+    do: text |> to_string() |> String.split("\n") |> List.last() |> String.slice(0, 100)
+
+  defp summary(record) do
+    setup =
+      record.steps
+      |> Enum.filter(&(&1.profile != nil))
+      |> Enum.group_by(& &1.profile, & &1.ms)
+      |> Enum.map(fn {p, ms} -> "#{p} #{seconds(Enum.sum(ms)) |> String.trim()}" end)
+
+    Mix.shell().info("""
+
+    Sprite:     #{record.name}
+    URL:        #{record.url || "(unknown)"}
+    Labels:     #{Enum.join(record.labels, ", ")} (set #{record.labels_via || "-"})
+    Checkpoint: #{record.checkpoint || "(none)"}  "profiled: #{record.set}"
+    Per profile: #{Enum.join(setup, "; ")}
+    Total:      #{seconds(record.total_ms) |> String.trim()}
+    Record:     #{record.record_path}\
+    """)
+  end
+end

@@ -9,9 +9,9 @@ launch it and it is never saved in a checkpoint). Pick a few profiles and they m
 explicit rules: union where that is safe, a refusal in plain words where two of them
 disagree.
 
-**Status: work in progress.** The profile format, the merge rules and `mix profiles.plan`
-work today. Creating and profiling a real Sprite, the MCP server for agents, and the web
-catalogue are next.
+**Status: work in progress.** The profile format, the merge rules, `mix profiles.plan` and
+`mix profiles.launch` (create a real Sprite and apply a set to it) work today. The MCP server
+for agents and the web catalogue are next.
 
 ## Try it
 
@@ -27,6 +27,36 @@ mix profiles.plan --profile claude-code --profile anthropic-key --agent    # ref
 `mix profiles.plan` prints the merged plan, including the order profiles are applied in, or
 the refusal (and exits non-zero). It needs no Sprite and no token.
 
+### Launch a Sprite
+
+You need the [`sprite` CLI](https://docs.fly.io/sprites/quickstart.md), logged in. The
+launcher runs it for you; it never reads or prints your token.
+
+```sh
+mix profiles.launch --profile claude-code --profile preview --name demo-1
+mix profiles.launch --profile claude-code --profile github --name demo-2   # refused until a GitHub connector admits profile:github
+sprite destroy --force demo-1
+```
+
+It creates the Sprite with its labels, sets the network policy, applies each profile
+(files, skills, Claude settings, MCP servers, `setup.sh` under a Task hold, services),
+checkpoints it as `profiled: claude-code+preview`, applies privileged profiles after the
+checkpoint, and prints each step's time as it goes. `--dry-run` stops after resolving the
+set; `--destroy-on-failure` removes the Sprite if a step fails. A record of each launch goes
+to `~/.local/state/sprite-profiles/launches/`, outside the repository.
+
+To look inside afterwards:
+
+```sh
+sprite exec -s demo-1 -- claude mcp list
+sprite exec -s demo-1 -- ls ~/.claude/skills
+sprite checkpoint list -s demo-1
+```
+
+A privileged profile's secret is read from `~/.config/sprite-profiles/secrets/<NAME>` (one
+line, `chmod 600`). On a server without the CLI, `--adapter api` calls the Sprites API with
+the org token in `SPRITES_TOKEN`; that path is tested against a stub only so far.
+
 ## The example profiles
 
 | profile | shows |
@@ -37,7 +67,8 @@ the refusal (and exits non-zero). It needs no Sprite and no token.
 | `anthropic-key` | privileged: an Anthropic API key, read from your machine at launch |
 | `preview` | a static-file service on the Sprite's URL |
 
-Setup scripts in the examples have not yet been run on a Sprite.
+`claude-code` and `preview` have been applied to fresh Sprites. `github` needs a GitHub
+connector in your org; `playwright` and `anthropic-key` are measured next.
 
 ## Read more
 
