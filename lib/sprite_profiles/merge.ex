@@ -7,7 +7,7 @@ defmodule SpriteProfiles.Merge do
   refusal found is returned, not only the first, so a person can fix them in one pass.
   """
 
-  alias SpriteProfiles.{Plan, Profile, Refusal}
+  alias SpriteProfiles.{ClaudeSettings, Plan, Profile, Refusal}
 
   @max_picks 8
 
@@ -279,7 +279,8 @@ defmodule SpriteProfiles.Merge do
     end
   end
 
-  ## Claude settings: deep merge; a leaf set differently by two profiles refuses
+  ## Claude settings: deep merge; a leaf set differently by two profiles refuses, except
+  ## the lists that combine (hooks arrays, permissions.allow/deny)
 
   defp merge_settings(profiles) do
     {merged, _owners, refusals} =
@@ -290,6 +291,10 @@ defmodule SpriteProfiles.Merge do
           case conflict(merged, owners, path, v) do
             :ok ->
               {put_in_path(merged, path, v), Map.put_new(owners, path, p.name), refusals}
+
+            :combine ->
+              combined = ClaudeSettings.combine(get_path(merged, path), v)
+              {put_in_path(merged, path, combined), owners, refusals}
 
             :same ->
               {merged, owners, refusals}
@@ -314,9 +319,14 @@ defmodule SpriteProfiles.Merge do
   end
 
   # A leaf conflicts with an equal path holding another value, or with a path that is a
-  # prefix of it (or it of one) already set by another profile.
+  # prefix of it (or it of one) already set by another profile. The lists in
+  # `ClaudeSettings.combinable?/1` combine instead, when both sides are lists.
   defp conflict(merged, owners, path, v) do
     cond do
+      Map.has_key?(owners, path) and ClaudeSettings.combinable?(path) and is_list(v) and
+          is_list(get_path(merged, path)) ->
+        :combine
+
       Map.has_key?(owners, path) ->
         if get_path(merged, path) == v, do: :same, else: {:conflict, path}
 

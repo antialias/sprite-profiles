@@ -257,6 +257,92 @@ defmodule SpriteProfiles.MergeTest do
       assert r.code == :settings_collision
     end
 
+    test "hooks arrays combine in pick order, each profile's entries kept whole" do
+      plan =
+        merge!([
+          profile!("aa", """
+          [[claude.settings.hooks.Stop]]
+          hooks = [ { type = "command", command = "a-stop" } ]
+          [[claude.settings.hooks.PreToolUse]]
+          matcher = "Bash"
+          hooks = [ { type = "command", command = "a-1" }, { type = "command", command = "a-2" } ]
+          """),
+          profile!("bb", """
+          [[claude.settings.hooks.PreToolUse]]
+          hooks = [ { type = "command", command = "b-1" } ]
+          """)
+        ])
+
+      assert plan.claude_settings["hooks"]["PreToolUse"] == [
+               %{
+                 "matcher" => "Bash",
+                 "hooks" => [
+                   %{"type" => "command", "command" => "a-1"},
+                   %{"type" => "command", "command" => "a-2"}
+                 ]
+               },
+               %{"hooks" => [%{"type" => "command", "command" => "b-1"}]}
+             ]
+
+      assert plan.claude_settings["hooks"]["Stop"] == [
+               %{"hooks" => [%{"type" => "command", "command" => "a-stop"}]}
+             ]
+    end
+
+    test "an identical hook entry from two profiles is kept once" do
+      hook = """
+      [[claude.settings.hooks.Stop]]
+      hooks = [ { type = "command", command = "same" } ]
+      """
+
+      plan = merge!([profile!("aa", hook), profile!("bb", hook)])
+
+      assert plan.claude_settings["hooks"]["Stop"] == [
+               %{"hooks" => [%{"type" => "command", "command" => "same"}]}
+             ]
+    end
+
+    test "permissions.allow and deny combine and deduplicate; other lists stay leaves" do
+      plan =
+        merge!([
+          profile!(
+            "aa",
+            ~s|[claude.settings.permissions]\nallow = ["Bash(ls)", "Read"]\ndeny = ["WebFetch"]|
+          ),
+          profile!("bb", ~s|[claude.settings.permissions]\nallow = ["Read", "Bash(git *)"]|)
+        ])
+
+      assert plan.claude_settings["permissions"] == %{
+               "allow" => ["Bash(ls)", "Read", "Bash(git *)"],
+               "deny" => ["WebFetch"]
+             }
+
+      [r] =
+        refusals([
+          profile!("aa", ~s([claude.settings.permissions]\nadditionalDirectories = ["/a"])),
+          profile!("bb", ~s([claude.settings.permissions]\nadditionalDirectories = ["/b"]))
+        ])
+
+      assert r.code == :settings_collision
+    end
+
+    test "a scalar beside the combining lists keeps the collision rule" do
+      [r] =
+        refusals([
+          profile!(
+            "aa",
+            ~s([claude.settings.permissions]\nallow = ["Read"]\ndefaultMode = "plan")
+          ),
+          profile!(
+            "bb",
+            ~s([claude.settings.permissions]\nallow = ["Read"]\ndefaultMode = "acceptEdits")
+          )
+        ])
+
+      assert r.code == :settings_collision
+      assert r.message =~ "permissions.defaultMode"
+    end
+
     test "skills are namespaced by profile, so same-named skills never collide" do
       skill = [%{name: "howto", source: nil, files: ["SKILL.md"]}]
       plan = merge!([profile!("aa", "", skills: skill), profile!("bb", "", skills: skill)])
