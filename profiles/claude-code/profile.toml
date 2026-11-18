@@ -1,0 +1,36 @@
+name        = "claude-code"
+summary     = "Claude Code set up to work unattended: Task-hold hooks, trust, one MCP server"
+description = """
+Gets Claude Code on a Sprite ready to work without a person watching. Hooks hold a Sprites \
+Task while a turn is running and release it when Claude stops, so the Sprite stays awake \
+mid-turn and may sleep while it waits for you. ~/work is pre-trusted so Claude does not stop \
+at the folder-trust question, the Bash tool gets a longer timeout, and one MCP server that \
+needs no sign-in (Context7) is registered. It brings no model access of its own: sign in to \
+claude.ai, or add a profile that provides a key."""
+timeout     = "5m"
+
+[env]
+DISABLE_AUTOUPDATER = "1"   # keep the Claude Code version that was checkpointed
+
+[policy]
+rules = [
+  { include = "defaults" },
+  { action = "allow", domain = "mcp.context7.com" },
+]
+
+[claude.settings.env]
+BASH_DEFAULT_TIMEOUT_MS = "600000"
+
+[[claude.settings.hooks.UserPromptSubmit]]
+hooks = [ { type = "command", command = "~/.config/profiled/hooks/task-hold.sh hold" } ]
+
+[[claude.settings.hooks.PreToolUse]]
+hooks = [ { type = "command", command = "~/.config/profiled/hooks/task-hold.sh hold" } ]
+
+[[claude.settings.hooks.Stop]]
+hooks = [ { type = "command", command = "~/.config/profiled/hooks/task-hold.sh release" } ]
+
+[claude.mcp_servers.context7]
+type = "http"
+url  = "https://mcp.context7.com/mcp"
+auth = "none"

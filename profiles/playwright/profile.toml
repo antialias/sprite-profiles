@@ -1,0 +1,16 @@
+name        = "playwright"
+summary     = "Playwright with Chromium, for browser tests and screenshots"
+description = """
+Installs Playwright and its Chromium build with the system libraries it needs. This is the \
+heavy profile: its setup takes minutes on a fresh Sprite, where restoring a checkpoint takes \
+under a second, which is the case for being able to start a new Sprite from a checkpoint."""
+timeout     = "20m"
+
+[policy]
+# npm comes with the defaults; the browser download comes from Playwright's CDN.
+# Untested: milestone M3 confirms whether the system packages need more domains.
+rules = [
+  { include = "defaults" },
+  { action = "allow", domain = "cdn.playwright.dev" },
+  { action = "allow", domain = "playwright.download.prss.microsoft.com" },
+]

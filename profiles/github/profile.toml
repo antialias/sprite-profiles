@@ -1,0 +1,20 @@
+name        = "github"
+summary     = "GitHub through Fly's connector gateway; no token in the Sprite"
+description = """
+Gives the Sprite GitHub access through the Sprites connector gateway, so no GitHub token \
+ever lives in the Sprite. The org's GitHub connector is authorised once in the Sprites \
+dashboard, with an access policy that admits Sprites labelled profile:github; every Sprite \
+launched with this profile carries that label. GITHUB_GATEWAY_URL is resolved from the \
+connector at launch, and a skill tells the agent to use it and never ask for a token."""
+
+[env]
+GITHUB_GATEWAY_URL = { from = "connector", provider = "github" }
+
+[policy]
+rules = [
+  { include = "defaults" },
+  { action = "allow", domain = "api.sprites.dev" },
+]
+
+[[connectors]]
+provider = "github"

@@ -1,0 +1,13 @@
+name        = "preview"
+summary     = "A static-file service on port 8080, served at the Sprite's URL"
+description = """
+Serves ~/site on port 8080 as a Sprites service with http_port, so the Sprite's own URL \
+shows it and a request to the URL wakes the Sprite. A Sprite routes its URL to one service, \
+so this profile cannot be combined with another that sets http_port."""
+
+[[services]]
+name      = "preview"
+cmd       = "python3"
+args      = ["-m", "http.server", "8080"]
+http_port = 8080
+dir       = "~/site"
