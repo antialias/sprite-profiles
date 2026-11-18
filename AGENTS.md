@@ -1,3 +1,28 @@
+# sprite-profiles: notes for agents
+
+Composable profiles for Fly.io Sprites. `docs/SPEC.md` is the contract for the profile format and
+the merge rules; `README.md` says what this is for people.
+
+## Run and check
+
+- `mix deps.get`, then `mix profiles.plan --profile claude-code --profile github` prints a merged
+  plan or a coded refusal (`--agent` judges the set as an agent would).
+- The gate, before every commit: `mix format --check-formatted`, `mix compile --warnings-as-errors`,
+  `mix test`.
+- A change to a merge rule changes `docs/SPEC.md` and adds a test in the same commit.
+
+## Public repo
+
+This repository is public. Follow the privacy checklist in `CONTRIBUTING.md` for code, comments,
+docs, fixtures, recordings and commit messages. Commit with the GitHub no-reply address, never a
+personal one.
+
+## Landing
+
+Work on a branch. When a milestone is finished and its gate passes, scan the tracked files and
+`git log -p` of the new commits against the privacy checklist, then push to `main`. Anything else
+(a deploy, a release, a change to the repo's settings or visibility) is the owner's call each time.
+
 ## Phoenix project guidelines (from the Phoenix generator)
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
