@@ -30,6 +30,25 @@ defmodule Mix.Tasks.Profiles.LaunchTest do
     assert out =~ "Dry run: nothing was created."
   end
 
+  @tag :tmp_dir
+  test "--secrets-dir says where a privileged profile's secret is read from", %{tmp_dir: tmp} do
+    assert catch_exit(
+             Launch.run(["-p", "claude-code", "-p", "anthropic-key", "--secrets-dir", tmp])
+           ) == {:shutdown, 1}
+
+    out = output()
+    assert out =~ "[secret_missing]"
+    assert out =~ Path.join(tmp, "ANTHROPIC_API_KEY")
+
+    File.write!(Path.join(tmp, "ANTHROPIC_API_KEY"), "sk-test-not-real\n")
+
+    Launch.run(~w(-p claude-code -p anthropic-key --dry-run --secrets-dir) ++ [tmp])
+
+    out = output()
+    assert out =~ "Dry run: nothing was created."
+    refute out =~ "sk-test-not-real"
+  end
+
   test "a refused set exits 1 before any Sprite call" do
     assert catch_exit(Launch.run(["-p", "preview", "-p", "preview"])) == {:shutdown, 1}
     assert output() =~ "[duplicate_pick]"

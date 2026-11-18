@@ -41,6 +41,30 @@ defmodule Mix.Tasks.Profiles.PlanTest do
     assert output() =~ "[profile_not_found]"
   end
 
+  @tag :tmp_dir
+  test "searches every --dir, and refuses a name found in two of them", %{tmp_dir: tmp} do
+    private = Path.join(tmp, "private")
+    File.mkdir_p!(Path.join(private, "my-model"))
+
+    File.write!(
+      Path.join([private, "my-model", "profile.toml"]),
+      ~s(name = "my-model"\nsummary = "a private profile"\n)
+    )
+
+    Plan.run(["-p", "claude-code", "-p", "my-model", "--dir", "profiles", "--dir", private])
+    assert output() =~ "Plan for claude-code+my-model"
+
+    File.cp_r!("profiles/preview", Path.join(private, "preview"))
+
+    assert catch_exit(Plan.run(["-p", "preview", "--dir", "profiles", "--dir", private])) ==
+             {:shutdown, 1}
+
+    out = output()
+    assert out =~ "[profile_ambiguous]"
+    assert out =~ Path.join(private, "preview")
+    assert out =~ Path.expand("profiles/preview")
+  end
+
   test "exits 2 on bad usage" do
     capture_io(:stderr, fn ->
       assert catch_exit(Plan.run(["--bogus"])) == {:shutdown, 2}

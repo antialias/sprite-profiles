@@ -16,24 +16,28 @@ defmodule Mix.Tasks.Profiles.Launch do
     * `--name` - the Sprite's name (default: the picks joined by '-', then 4 hex digits)
     * `--dry-run` - resolve the set and print the plan; create nothing
     * `--destroy-on-failure` - destroy the Sprite if a step after its creation fails
-    * `--dir` - the folder holding the profiles (default `profiles`)
+    * `--dir` - a folder holding profiles; repeat it to search several (default: `profiles`
+      plus `~/.config/sprite-profiles/profiles` when it exists, or `SPRITE_PROFILES_PATH`)
+    * `--secrets-dir` - where privileged profiles' secrets are read from (default
+      `~/.config/sprite-profiles/secrets`)
     * `--adapter` - `cli` (default: the installed, logged-in `sprite` CLI) or `api` (REST
       with `SPRITES_TOKEN`)
 
-  Secrets for privileged profiles are read from `~/.config/sprite-profiles/secrets/<NAME>`.
+  Secrets for privileged profiles are read from `<secrets dir>/<NAME>`.
   Exits 1 when the set is refused or a step fails, 2 on bad usage.
   """
 
   use Mix.Task
 
-  alias SpriteProfiles.{Launcher, Plan, Sprites}
+  alias SpriteProfiles.{Launcher, Plan, ProfilePath, Sprites}
 
   @switches [
     profile: :keep,
     name: :string,
     dry_run: :boolean,
     destroy_on_failure: :boolean,
-    dir: :string,
+    dir: :keep,
+    secrets_dir: :string,
     adapter: :string
   ]
   @aliases [p: :profile]
@@ -56,7 +60,7 @@ defmodule Mix.Tasks.Profiles.Launch do
 
   defp usage_error(extra) do
     Mix.shell().error(
-      "usage: mix profiles.launch --profile NAME [--profile NAME ...] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR] [--adapter cli|api]" <>
+      "usage: mix profiles.launch --profile NAME [--profile NAME ...] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]" <>
         if(extra == "", do: "", else: "\nnot understood: " <> extra)
     )
 
@@ -109,7 +113,12 @@ defmodule Mix.Tasks.Profiles.Launch do
   end
 
   defp resolve_opts(opts) do
-    [dir: Keyword.get(opts, :dir, "profiles"), name: opts[:name], caller: :person]
+    [
+      dirs: ProfilePath.dirs(Keyword.get_values(opts, :dir)),
+      secrets_dir: Keyword.get(opts, :secrets_dir, Launcher.default_secrets_dir()),
+      name: opts[:name],
+      caller: :person
+    ]
   end
 
   defp sprites("cli"), do: Sprites.new(Sprites.Cli, [])

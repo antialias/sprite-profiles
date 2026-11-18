@@ -21,7 +21,7 @@ defmodule SpriteProfiles.Launcher do
   All Sprite access goes through a `SpriteProfiles.Sprites` handle, so tests use a stub.
   """
 
-  alias SpriteProfiles.{ClaudeSettings, Merge, Plan, Profile, Refusal, Sprites}
+  alias SpriteProfiles.{ClaudeSettings, Merge, Plan, Profile, ProfilePath, Refusal, Sprites}
 
   @gateway "https://api.sprites.dev/v1/gateway"
   @sprite_name_re ~r/^[a-z][a-z0-9-]{1,62}$/
@@ -37,14 +37,13 @@ defmodule SpriteProfiles.Launcher do
   Resolves `names` into `{:ok, plan, profiles, secrets}`, or `{:error, refusals}`. Local
   only: reads the profiles folder and the secrets folder, calls nothing.
 
-  Options: `:dir` (profiles folder), `:caller` (`:person` or `:agent`), `:secrets_dir`,
+  Options: `:dirs` (the profile search path; see `SpriteProfiles.ProfilePath`), `:dir` (one
+  folder, instead of `:dirs`), `:caller` (`:person` or `:agent`), `:secrets_dir`,
   `:name` (checked when given).
   """
   def resolve(names, opts \\ []) do
-    dir = Keyword.get(opts, :dir, "profiles")
-
     with :ok <- Merge.check_picks(names),
-         {:ok, profiles} <- load(names, dir),
+         {:ok, profiles} <- ProfilePath.find(names, dirs(opts)),
          {:ok, plan} <- Merge.merge(profiles, caller: Keyword.get(opts, :caller, :person)),
          :ok <- check_name(opts[:name]),
          {:ok, secrets} <- read_secrets(plan, Keyword.get(opts, :secrets_dir, @secrets_dir)) do
@@ -367,31 +366,11 @@ defmodule SpriteProfiles.Launcher do
 
   ## resolve helpers
 
-  defp load(names, dir) do
-    results =
-      Enum.map(names, fn name ->
-        path = Path.join(dir, name)
-
-        if File.dir?(path) do
-          Profile.load(path)
-        else
-          {:error,
-           [
-             Refusal.new(
-               :profile_not_found,
-               [name],
-               "there is no profile '#{name}' in #{dir}; check the name or pass --dir."
-             )
-           ]}
-        end
-      end)
-
-    case Enum.flat_map(results, fn
-           {:error, e} -> e
-           _ -> []
-         end) do
-      [] -> {:ok, Enum.map(results, fn {:ok, p} -> p end)}
-      errors -> {:error, errors}
+  defp dirs(opts) do
+    cond do
+      opts[:dirs] -> opts[:dirs]
+      opts[:dir] -> [Path.expand(opts[:dir])]
+      true -> ProfilePath.dirs([])
     end
   end
 
@@ -445,6 +424,9 @@ defmodule SpriteProfiles.Launcher do
 
     if refusals == [], do: {:ok, secrets}, else: {:error, refusals}
   end
+
+  @doc "Where secrets are read from unless `:secrets_dir` says otherwise."
+  def default_secrets_dir, do: @secrets_dir
 
   @doc "The default Sprite name for a plan: the picks joined by '-', then 4 hex digits."
   def default_name(%Plan{profiles: names}) do

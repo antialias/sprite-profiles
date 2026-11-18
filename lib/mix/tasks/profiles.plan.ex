@@ -13,7 +13,9 @@ defmodule Mix.Tasks.Profiles.Plan do
   Options:
 
     * `--profile`, `-p` - a profile to pick; repeat it, in the order to apply them
-    * `--dir` - the folder holding the profiles (default `profiles`)
+    * `--dir` - a folder holding profiles; repeat it to search several. With no `--dir` and
+      no `SPRITE_PROFILES_PATH`, the search path is `profiles` plus
+      `~/.config/sprite-profiles/profiles` when it exists
     * `--agent` - judge the set as an agent would launch it (privileged sets are refused)
 
   Exits 1 when the set is refused or a profile is invalid, 2 on bad usage.
@@ -21,9 +23,9 @@ defmodule Mix.Tasks.Profiles.Plan do
 
   use Mix.Task
 
-  alias SpriteProfiles.{Merge, Plan, Profile}
+  alias SpriteProfiles.{Merge, Plan, ProfilePath}
 
-  @switches [profile: :keep, dir: :string, agent: :boolean]
+  @switches [profile: :keep, dir: :keep, agent: :boolean]
   @aliases [p: :profile]
 
   @impl Mix.Task
@@ -34,13 +36,13 @@ defmodule Mix.Tasks.Profiles.Plan do
     case OptionParser.parse(argv, strict: @switches, aliases: @aliases) do
       {opts, [], []} ->
         names = Keyword.get_values(opts, :profile)
-        dir = Keyword.get(opts, :dir, "profiles")
+        dirs = ProfilePath.dirs(Keyword.get_values(opts, :dir))
         caller = if opts[:agent], do: :agent, else: :person
-        plan(names, dir, caller)
+        plan(names, dirs, caller)
 
       {_, args, invalid} ->
         Mix.shell().error(
-          "usage: mix profiles.plan --profile NAME [--profile NAME ...] [--dir DIR] [--agent]" <>
+          "usage: mix profiles.plan --profile NAME [--profile NAME ...] [--dir DIR ...] [--agent]" <>
             unexpected(args, invalid)
         )
 
@@ -54,9 +56,9 @@ defmodule Mix.Tasks.Profiles.Plan do
     "\nnot understood: " <> Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " ")
   end
 
-  defp plan(names, dir, caller) do
+  defp plan(names, dirs, caller) do
     with :ok <- Merge.check_picks(names),
-         {:ok, profiles} <- load(names, dir),
+         {:ok, profiles} <- ProfilePath.find(names, dirs),
          {:ok, plan} <- Merge.merge(profiles, caller: caller) do
       Mix.shell().info(Plan.format(plan))
     else
@@ -64,34 +66,6 @@ defmodule Mix.Tasks.Profiles.Plan do
         Mix.shell().error("Refused:")
         Enum.each(problems, &Mix.shell().error("  [#{&1.code}] #{&1.message}"))
         exit({:shutdown, 1})
-    end
-  end
-
-  defp load(names, dir) do
-    results =
-      Enum.map(names, fn name ->
-        path = Path.join(dir, name)
-
-        if File.dir?(path) do
-          Profile.load(path)
-        else
-          {:error,
-           [
-             SpriteProfiles.Refusal.new(
-               :profile_not_found,
-               [name],
-               "there is no profile '#{name}' in #{dir}; check the name or pass --dir."
-             )
-           ]}
-        end
-      end)
-
-    case Enum.flat_map(results, fn
-           {:error, e} -> e
-           _ -> []
-         end) do
-      [] -> {:ok, Enum.map(results, fn {:ok, p} -> p end)}
-      errors -> {:error, errors}
     end
   end
 end

@@ -54,8 +54,20 @@ sprite checkpoint list -s demo-1
 ```
 
 A privileged profile's secret is read from `~/.config/sprite-profiles/secrets/<NAME>` (one
-line, `chmod 600`). On a server without the CLI, `--adapter api` calls the Sprites API with
+line, `chmod 600`), or from the folder `--secrets-dir` names. On a server without the CLI, `--adapter api` calls the Sprites API with
 the org token in `SPRITES_TOKEN`; that path is tested against a stub only so far.
+
+### Your own profiles
+
+Profiles that hold your own credentials or tools belong outside this repository. Put them in
+`~/.config/sprite-profiles/profiles/<name>/` and they are found next to the examples; or name
+folders with `--dir` (repeatable) or `SPRITE_PROFILES_PATH` (colon-separated), which replace
+the default path. A name found in two folders is refused, naming both, so a private profile
+never silently shadows an example.
+
+```sh
+mix profiles.plan -p claude-code -p my-model --dir profiles --dir ~/my-profiles
+```
 
 ## The example profiles
 

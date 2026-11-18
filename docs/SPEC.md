@@ -6,7 +6,8 @@ that reads TOML can read a profile and apply the same rules.
 
 ## Profiles
 
-A **profile** is a folder under `profiles/<name>/` that says what a Sprite needs.
+A **profile** is a folder `<name>/` that says what a Sprite needs. The examples live under
+`profiles/` in this repository; your own can live anywhere on the search path (below).
 
 ```
 profiles/playwright/
@@ -22,6 +23,24 @@ profiles/playwright/
 - Each folder in `claude/skills/` must hold a `SKILL.md`. Skill names are lowercase letters,
   digits and `-`. Nothing else may sit in `claude/`.
 - Other files in the profile folder (a README, say) are ignored.
+
+### Where profiles are found
+
+Profiles are looked up along a **search path** of folders, each holding profile folders:
+
+1. every `--dir` given, in order;
+2. then each folder in `SPRITE_PROFILES_PATH` (colon-separated);
+3. when neither names a folder: the repository's `profiles/`, plus
+   `~/.config/sprite-profiles/profiles` when it exists.
+
+So a profile that names your own credential or your own tools can live outside the
+repository and still compose with the examples. A pick must be in exactly one folder on the
+path: the same name in two folders is refused (`profile_ambiguous`), naming both paths,
+rather than one silently shadowing the other. A folder on the path that does not exist is
+refused (`profile_dir_missing`).
+
+Secrets for privileged profiles are read from `~/.config/sprite-profiles/secrets/<NAME>`,
+or the folder `--secrets-dir` names.
 
 ### profile.toml
 
@@ -126,7 +145,8 @@ union where that is safe, refusal where two profiles disagree. Nothing is picked
 | order | pick order, except that privileged profiles (and any with `checkpoint = false`) are applied after the `profiled` checkpoint, so credentials are never in a checkpoint. The plan prints the final order | |
 | bounds | 1 to 8 picks, none repeated, every name valid | `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name` |
 
-A pick that names no folder is refused with `profile_not_found`; a profile that fails
+A pick that names no folder on the search path is refused with `profile_not_found`, one found
+in two folders with `profile_ambiguous`; a profile that fails
 validation is reported with its validation codes.
 
 ### Refusals

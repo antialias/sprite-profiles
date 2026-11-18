@@ -7,6 +7,7 @@ defmodule SpriteProfiles.Refusal do
   codes instead.
 
   Codes: `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `profile_not_found`,
+  `profile_ambiguous`, `profile_dir_missing`,
   `env_collision`, `service_collision`, `http_port_conflict`,
   `mcp_server_collision`, `mcp_needs_login`, `settings_collision`, `file_collision`,
   `connector_missing`, `not_for_agents`; at launch also `secret_missing` and `bad_sprite_name`.
