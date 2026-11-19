@@ -19,9 +19,9 @@ defmodule Mix.Tasks.Profiles.Plan do
     * `--profile`, `-p` - a profile to pick: a local name, an address or `@owner/name`
       (`owner/repo[/path]@ref`); repeat it, in the order to apply them
     * `--lock` - a lock file written by `mix profiles.lock`: the set, with every address
-      pinned to a commit. Instead of `--profile`
-    * `--offline` - call nothing: an address must be pinned (by `--lock` or a full commit)
-      and its commit already cached
+      and name pinned to a commit. Instead of `--profile`
+    * `--offline` - call nothing: an address must be pinned (by `--lock` or a full commit),
+      a name (`@owner/name`) must be pinned by `--lock`, and their commits already cached
     * `--dir` - a folder holding profiles; repeat it to search several. With no `--dir` and
       no `SPRITE_PROFILES_PATH`, the search path is `profiles` plus
       `~/.config/sprite-profiles/profiles` when it exists
@@ -29,12 +29,13 @@ defmodule Mix.Tasks.Profiles.Plan do
       given takes its default. Not with `--lock`, which holds its own
     * `--agent` - judge the set as an agent would launch it (privileged sets are refused)
 
-  Exits 1 when the set is refused or a profile is invalid, 2 on bad usage.
+  Exits 1 when the set is refused or a profile is invalid, 2 on bad usage (including no
+  `--profile` and no `--lock`).
   """
 
   use Mix.Task
 
-  alias SpriteProfiles.{Plan, Planner, ProfilePath, SetArgs}
+  alias SpriteProfiles.{Commands, MixShell, Out, ProfilePath, SetArgs}
 
   @switches [
     profile: :keep,
@@ -46,53 +47,40 @@ defmodule Mix.Tasks.Profiles.Plan do
   ]
   @aliases [p: :profile, i: :input]
 
+  @usage "usage: mix profiles.plan (--profile PICK [--profile PICK ...] [-i NAME=VALUE ...] | --lock FILE) [--offline] [--dir DIR ...] [--agent]"
+
   @impl Mix.Task
   def run(argv) do
     Mix.Task.run("compile", [])
     Mix.Task.run("loadpaths", [])
     Application.ensure_all_started(:req)
 
-    case OptionParser.parse(argv, strict: @switches, aliases: @aliases) do
-      {opts, [], []} ->
-        dirs = ProfilePath.dirs(Keyword.get_values(opts, :dir))
-        caller = if opts[:agent], do: :agent, else: :person
+    out = MixShell.out(@usage)
 
-        case SetArgs.picks(opts) do
-          {:ok, picks, resolve_opts} -> plan(picks, [dirs: dirs, caller: caller] ++ resolve_opts)
-          {:usage, message} -> usage(message)
-          {:error, problems} -> refused(problems)
-        end
+    status =
+      case OptionParser.parse(argv, strict: @switches, aliases: @aliases) do
+        {opts, [], []} ->
+          dirs = ProfilePath.dirs(Keyword.get_values(opts, :dir))
+          caller = if opts[:agent], do: :agent, else: :person
 
-      {_, args, invalid} ->
-        usage(unexpected(args, invalid))
-    end
-  end
+          case SetArgs.picks(opts) do
+            {:ok, picks, resolve_opts} ->
+              Commands.Plan.run(picks, [dirs: dirs, caller: caller] ++ resolve_opts, out)
 
-  defp usage(extra) do
-    Mix.shell().error(
-      "usage: mix profiles.plan (--profile PICK [--profile PICK ...] [-i NAME=VALUE ...] | --lock FILE) [--offline] [--dir DIR ...] [--agent]" <>
-        if(extra == "", do: "", else: "\n" <> extra)
-    )
+            {:usage, message} ->
+              Out.usage(out, message)
 
-    exit({:shutdown, 2})
-  end
+            {:error, problems} ->
+              Out.refused(out, problems)
+          end
 
-  defp unexpected([], []), do: ""
+        {_, args, invalid} ->
+          Out.usage(
+            out,
+            "not understood: " <> Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " ")
+          )
+      end
 
-  defp unexpected(args, invalid) do
-    "not understood: " <> Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " ")
-  end
-
-  defp plan(picks, opts) do
-    case Planner.plan(picks, opts) do
-      {:ok, plan} -> Mix.shell().info(Plan.format(plan))
-      {:error, problems} -> refused(problems)
-    end
-  end
-
-  defp refused(problems) do
-    Mix.shell().error("Refused:")
-    Enum.each(problems, &Mix.shell().error("  [#{&1.code}] #{&1.message}"))
-    exit({:shutdown, 1})
+    MixShell.finish(status)
   end
 end

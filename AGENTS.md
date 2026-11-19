@@ -13,8 +13,12 @@ the merge rules; `README.md` says what this is for people.
 - The `sprite-profiles` binary: `MIX_ENV=prod BURRITO_TARGET=macos_arm64 mix release` writes
   `burrito_out/sprite_profiles_macos_arm64` (needs zig 0.16.0 and xz; see `releases/0` in
   `mix.exs`). `SpriteProfiles.CLI` is its entry point and runs from `Application.start/2`, so
-  nothing it calls may wait on the application controller. `.github/workflows/release.yml`
-  builds it for a `v*` tag.
+  nothing it calls may wait on the application controller or use `Mix`. The commands live in
+  `SpriteProfiles.Commands.*` and write through `SpriteProfiles.Out`; the Mix tasks are thin
+  callers of them. `.github/workflows/release.yml` builds it for a `v*` tag.
+- Burrito extracts the release once per app version (under
+  `~/Library/Application Support/.burrito/` on macOS), so a rebuild at the same version runs
+  the old code until `echo y | burrito_out/sprite_profiles_macos_arm64 maintenance uninstall`.
 
 ## Public repo
 
