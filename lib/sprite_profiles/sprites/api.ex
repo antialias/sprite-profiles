@@ -40,6 +40,19 @@ defmodule SpriteProfiles.Sprites.Api do
   end
 
   @impl true
+  def create_custom_connector(cfg, body) do
+    with {:ok, json} <- request(cfg, :post, Rest.custom_connector_path(), json: body),
+         do: Rest.created_connector(json)
+  end
+
+  @impl true
+  def test_custom_connector(cfg, id) do
+    with {:ok, json} <-
+           request(cfg, :post, Rest.custom_connector_test_path(), json: %{"connection_id" => id}),
+         do: Rest.test_result(json)
+  end
+
+  @impl true
   def create(cfg, name, labels) do
     with {:ok, json} <-
            request(cfg, :post, Rest.sprites_path(), json: Rest.create_body(name, labels)) do

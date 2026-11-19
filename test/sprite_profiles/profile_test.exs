@@ -44,7 +44,7 @@ defmodule SpriteProfiles.ProfileTest do
       assert p.labels == ["team-a"]
       assert p.env == %{"LOG_LEVEL" => "info", "GATEWAY" => {:connector, "github"}}
       assert p.policy == [:defaults, {:deny, "example.com"}]
-      assert p.connectors == ["github"]
+      assert Enum.map(p.connectors, & &1.provider) == ["github"]
       assert [%{name: "web", http_port: 8080, args: ["-m", "http.server", "8080"]}] = p.services
       assert p.claude_settings == %{"env" => %{"BASH_DEFAULT_TIMEOUT_MS" => "600000"}}
       assert [%{name: "docs", type: "http", auth_none: true}] = p.mcp_servers
@@ -247,11 +247,11 @@ defmodule SpriteProfiles.ProfileTest do
     end
 
     test "a newer format is one unsupported_format, before any field check" do
-      assert {:error, [e]} = parse("aa", "format = 2\nnew_field = 1\n[inputs]\nx = 1\n")
+      assert {:error, [e]} = parse("aa", "format = 3\nnew_field = 1\n[inputs]\nx = 1\n")
       assert e.code == :unsupported_format
 
       assert e.message ==
-               "profile 'aa' is format 2; this launcher reads up to format 1, so upgrade sprite-profiles."
+               "profile 'aa' is format 3; this launcher reads up to format 2, so upgrade sprite-profiles."
     end
 
     test "a format that is not a whole number is bad_field, with the other errors" do

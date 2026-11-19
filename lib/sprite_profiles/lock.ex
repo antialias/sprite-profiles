@@ -20,6 +20,10 @@ defmodule SpriteProfiles.Lock do
   name  = "linear"
   ```
 
+  A lock may also hold the values given for the set's inputs, in a top-level `[inputs]`
+  table; it is then `format = 2`, and `format = 1` otherwise, so a lock without inputs still
+  reads on an older launcher.
+
   A locked launch uses the commit and never resolves the ref. Locking again resolves every
   ref afresh; `diff/2` says which commits moved. A lock that cannot be read, misses a field
   or has a newer `format` is refused (`bad_lock`).
@@ -27,7 +31,8 @@ defmodule SpriteProfiles.Lock do
 
   alias SpriteProfiles.{Address, Profile, Refusal}
 
-  @format 1
+  @format 2
+  @input_name_re ~r/^[a-z][a-z0-9_]{0,30}$/
   @default_path "sprite-profiles.lock"
 
   @type entry :: %{
@@ -63,14 +68,23 @@ defmodule SpriteProfiles.Lock do
     end)
   end
 
-  @doc "The lock file's text for `entries`."
-  @spec encode([entry()], DateTime.t()) :: String.t()
-  def encode(entries, at \\ DateTime.utc_now()) do
+  @doc "The lock file's text for `entries` and the given `inputs` (`%{name => value}`)."
+  @spec encode([entry()], DateTime.t(), %{optional(String.t()) => String.t()}) :: String.t()
+  def encode(entries, at \\ DateTime.utc_now(), inputs \\ %{}) do
     head = """
     # A set with every address pinned to a commit. Written by `mix profiles.lock`.
-    format    = #{@format}
+    format    = #{if inputs == %{}, do: 1, else: 2}
     locked_at = #{q(at |> DateTime.truncate(:second) |> DateTime.to_iso8601())}
     """
+
+    head =
+      if inputs == %{} do
+        head
+      else
+        head <>
+          "\n[inputs]\n" <>
+          Enum.map_join(Enum.sort(inputs), "", fn {k, v} -> "#{k} = #{q(v)}\n" end)
+      end
 
     body =
       Enum.map_join(entries, "", fn e ->
@@ -90,20 +104,62 @@ defmodule SpriteProfiles.Lock do
   defp q(s),
     do: "\"" <> (s |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")) <> "\""
 
-  @doc "Writes the lock for `profiles` to `path`."
-  def write(path, profiles) do
-    File.write!(path, encode(entries(profiles)))
+  @doc "Writes the lock for `profiles`, with the given `inputs`, to `path`."
+  def write(path, profiles, inputs \\ %{}) do
+    File.write!(path, encode(entries(profiles), DateTime.utc_now(), inputs))
   end
 
   @doc """
-  Reads a lock file. Returns `{:ok, entries}` or `{:error, [refusal]}` (`bad_lock`).
+  Reads a lock file's picks. Returns `{:ok, entries}` or `{:error, [refusal]}` (`bad_lock`).
   """
   @spec read(Path.t()) :: {:ok, [entry()]} | {:error, [Refusal.t()]}
   def read(path) do
+    with {:ok, %{picks: entries}} <- load(path), do: {:ok, entries}
+  end
+
+  @doc """
+  Reads a lock file: `{:ok, %{picks: entries, inputs: %{name => value}}}` or
+  `{:error, [refusal]}` (`bad_lock`).
+  """
+  @spec load(Path.t()) ::
+          {:ok, %{picks: [entry()], inputs: %{optional(String.t()) => String.t()}}}
+          | {:error, [Refusal.t()]}
+  def load(path) do
     with {:ok, text} <- read_file(path),
-         {:ok, map} <- decode(text, path) do
-      validate(map, path)
+         {:ok, map} <- decode(text, path),
+         {:ok, entries} <- validate(map, path),
+         {:ok, inputs} <- validate_inputs(map, path) do
+      {:ok, %{picks: entries, inputs: inputs}}
     end
+  end
+
+  defp validate_inputs(%{"inputs" => inputs, "format" => f}, path) do
+    cond do
+      f < 2 ->
+        bad(path, "holds [inputs], which is format 2, but says format = #{f}")
+
+      not is_map(inputs) ->
+        bad(path, "has an [inputs] that is not a table")
+
+      true ->
+        case Enum.find(Enum.sort(inputs), fn {k, v} -> not input_ok?(k, v) end) do
+          nil ->
+            {:ok, inputs}
+
+          {k, _} ->
+            bad(
+              path,
+              "has a bad input #{inspect(k)}: a value is one line of text, at most 256 characters"
+            )
+        end
+    end
+  end
+
+  defp validate_inputs(_map, _path), do: {:ok, %{}}
+
+  defp input_ok?(k, v) do
+    Regex.match?(@input_name_re, k) and is_binary(v) and String.length(v) <= 256 and
+      not String.contains?(v, ["\n", "\r"])
   end
 
   defp read_file(path) do
@@ -139,7 +195,7 @@ defmodule SpriteProfiles.Lock do
         end)
 
       _ ->
-        bad(path, "needs format = #{@format} and a [[picks]] list")
+        bad(path, "needs a format (1 to #{@format}) and a [[picks]] list")
     end
   end
 

@@ -50,7 +50,7 @@ defmodule SpriteProfiles.LockTest do
 
     for {why, text} <- [
           {"not TOML", "format = = 1"},
-          {"newer format", String.replace(good, "format    = 1", "format = 2")},
+          {"newer format", String.replace(good, "format    = 1", "format = 3")},
           {"no format", String.replace(good, "format    = 1", "")},
           {"missing sha", String.replace(good, ~s(sha   = "#{sha1()}"\n), "")},
           {"short sha", String.replace(good, sha1(), "1a2b3c4")},
@@ -75,5 +75,37 @@ defmodule SpriteProfiles.LockTest do
              ["acme/profiles/linear@v1: 1a2b3c4d → 4d5e6f7a (tag moved)"]
 
     assert Lock.diff(old, old) == []
+  end
+
+  describe "inputs" do
+    test "a lock with inputs is format 2 and round-trips them; without, format 1", %{tmp_dir: tmp} do
+      with_inputs = Lock.encode(entries(), ~U[2026-11-19 10:00:00Z], %{"mode" => "a \"b\""})
+      assert with_inputs =~ "format    = 2"
+      assert with_inputs =~ "[inputs]\nmode = \"a \\\"b\\\"\"\n"
+
+      assert Lock.load(write(tmp, with_inputs)) ==
+               {:ok, %{picks: entries(), inputs: %{"mode" => "a \"b\""}}}
+
+      assert Lock.read(write(tmp, with_inputs)) == {:ok, entries()}
+
+      plain = Lock.encode(entries())
+      assert plain =~ "format    = 1"
+      assert Lock.load(write(tmp, plain)) == {:ok, %{picks: entries(), inputs: %{}}}
+    end
+
+    test "a bad [inputs] is bad_lock", %{tmp_dir: tmp} do
+      good = Lock.encode(entries(), DateTime.utc_now(), %{"mode" => "a"})
+
+      for {why, text} <- [
+            {"a value that is not a string", String.replace(good, ~s(mode = "a"), "mode = 1")},
+            {"a bad name", String.replace(good, ~s(mode = "a"), ~s(Mode = "a"))},
+            {"a value too long",
+             String.replace(good, ~s(mode = "a"), ~s(mode = "#{String.duplicate("a", 257)}"))},
+            {"inputs in a format-1 lock", String.replace(good, "format    = 2", "format = 1")}
+          ] do
+        assert {:error, [r]} = Lock.load(write(tmp, text)), why
+        assert r.code == :bad_lock, why
+      end
+    end
   end
 end

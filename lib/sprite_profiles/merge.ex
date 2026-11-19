@@ -132,7 +132,9 @@ defmodule SpriteProfiles.Merge do
   Merges `profiles` in pick order.
 
   Options: `caller: :person | :agent` (default `:person`). An agent is refused any set
-  holding a privileged profile (`not_for_agents`).
+  holding a privileged profile (`not_for_agents`). `inputs: %{name => value}`, the values
+  given for the set's inputs (`-i`, or a lock's `[inputs]`); an input not given takes its
+  default.
   """
   @spec merge([Profile.t()], keyword()) :: {:ok, Plan.t()} | {:error, [Refusal.t()]}
   def merge(profiles, opts \\ []) do
@@ -142,10 +144,12 @@ defmodule SpriteProfiles.Merge do
     with :ok <- check_picks(picks),
          :ok <- check_collisions(profiles),
          :ok <- check_labels(profiles) do
-      env = merge_env(profiles)
+      inputs = merge_inputs(profiles, Keyword.get(opts, :inputs, %{}))
+      env = merge_env(profiles, inputs.values)
       provided = Map.keys(env.value)
 
       results = [
+        inputs,
         env,
         merge_services(profiles),
         merge_mcp(profiles, provided),
@@ -157,10 +161,12 @@ defmodule SpriteProfiles.Merge do
         Enum.flat_map(results, & &1.refusals) ++ agent_refusals(profiles, opts)
 
       if refusals == [] do
-        [_env, services, mcp, settings, files] = results
+        [inputs, env, services, mcp, settings, files] = results
 
-        {:ok,
-         build_plan(profiles, env.value, services.value, mcp.value, settings.value, files.value)}
+        plan =
+          build_plan(profiles, env.value, services.value, mcp.value, settings.value, files.value)
+
+        {:ok, %{plan | inputs: inputs.value}}
       else
         {:error, refusals}
       end
@@ -277,19 +283,115 @@ defmodule SpriteProfiles.Merge do
     end
   end
 
+  # Catalogue providers are grouped by provider; a custom API connector is the profile's
+  # own, named by its qualified name.
   defp connectors(profiles) do
-    profiles
-    |> Enum.flat_map(fn p -> Enum.map(p.connectors, &{&1, p.qualified}) end)
-    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
-    |> Enum.map(fn {provider, owners} -> %{provider: provider, profiles: owners} end)
-    |> Enum.sort_by(fn c -> first_index(profiles, hd(c.profiles)) end)
+    entries = for p <- profiles, c <- p.connectors, do: {c, p.qualified}
+    {custom, catalogue} = Enum.split_with(entries, fn {c, _} -> c.provider == "custom_api" end)
+
+    grouped =
+      catalogue
+      |> Enum.group_by(fn {c, _} -> c.provider end, &elem(&1, 1))
+      |> Enum.map(fn {provider, owners} -> %{provider: provider, name: nil, profiles: owners} end)
+
+    own =
+      Enum.map(custom, fn {c, q} ->
+        c
+        |> Map.take([:provider, :base_url, :auth, :endpoints, :test_url])
+        |> Map.merge(%{name: q, profiles: [q]})
+      end)
+
+    Enum.sort_by(grouped ++ own, fn c ->
+      {first_index(profiles, hd(c.profiles)), c.name != nil}
+    end)
   end
 
   defp first_index(profiles, q), do: Enum.find_index(profiles, &(&1.qualified == q))
 
+  ## inputs: one name per set; each resolved to a value before any API call
+
+  defp merge_inputs(profiles, given) do
+    declared = for p <- profiles, {name, i} <- Enum.sort(p.inputs), do: {name, i, p}
+
+    collisions =
+      declared
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 2))
+      |> Enum.filter(fn {_, ps} -> length(ps) > 1 end)
+      |> Enum.sort_by(fn {_, [p | _]} -> first_index(profiles, p.qualified) end)
+      |> Enum.map(fn {name, [a, b | _]} ->
+        Refusal.new(
+          :input_collision,
+          [a.pick, b.pick],
+          "profiles '#{a.pick}' and '#{b.pick}' both declare input #{name}; a value is given by name alone, so rename it in one of them."
+        )
+      end)
+
+    known = MapSet.new(declared, &elem(&1, 0))
+
+    unknown =
+      given
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.reject(&MapSet.member?(known, &1))
+      |> Enum.map(fn name ->
+        have =
+          case Enum.sort(MapSet.to_list(known)) do
+            [] -> "the set declares no inputs"
+            names -> "the set's inputs are #{Enum.join(names, ", ")}"
+          end
+
+        Refusal.new(
+          :input_unknown,
+          [],
+          "an input #{name} was given, and no profile in the set declares it; #{have}."
+        )
+      end)
+
+    {values, entries, problems} =
+      declared
+      |> Enum.uniq_by(&elem(&1, 0))
+      |> Enum.reduce({%{}, [], []}, fn {name, input, p}, {values, entries, problems} ->
+        {value, default?} =
+          case Map.fetch(given, name) do
+            {:ok, v} -> {v, false}
+            :error -> {input.default, true}
+          end
+
+        cond do
+          is_nil(value) ->
+            {values, entries,
+             problems ++
+               [
+                 Refusal.new(
+                   :input_missing,
+                   [p.pick],
+                   "profile '#{p.pick}' needs input #{name} (#{input.summary}) and none was given; give it with -i #{name}=VALUE."
+                 )
+               ]}
+
+          why = Profile.input_problem(input, value) ->
+            {values, entries,
+             problems ++
+               [
+                 Refusal.new(
+                   :input_invalid,
+                   [p.pick],
+                   "profile '#{p.pick}' takes input #{name} (#{input.summary}), and the value given #{why}; give another."
+                 )
+               ]}
+
+          true ->
+            entry = %{name: name, value: value, default: default?, profile: p.qualified}
+            {Map.put(values, name, value), entries ++ [entry], problems}
+        end
+      end)
+
+    %{value: entries, values: values, refusals: collisions ++ unknown ++ problems}
+  end
+
   ## env: a key two profiles define is a refusal, even with the same value
 
-  defp merge_env(profiles) do
+  defp merge_env(profiles, inputs) do
     {value, refusals} =
       Enum.reduce(profiles, {%{}, []}, fn p, {acc, refusals} ->
         p.env
@@ -308,6 +410,12 @@ defmodule SpriteProfiles.Merge do
                  ]}
 
             _ ->
+              v =
+                case v do
+                  {:input, name} -> Map.get(inputs, name, v)
+                  v -> v
+                end
+
               {Map.put(acc, key, %{value: v, profile: p.qualified}), refusals}
           end
         end)
@@ -384,12 +492,13 @@ defmodule SpriteProfiles.Merge do
     missing = Enum.reject(s.requires_env, &(&1 in provided))
 
     cond do
-      type != "stdio" and not s.has_authorization and not s.auth_none ->
+      type != "stdio" and not s.has_authorization and not s.auth_none and
+          not Map.get(s, :auth_connector, false) ->
         [
           Refusal.new(
             :mcp_needs_login,
             [s.profile],
-            "profile '#{s.profile}' adds #{type} MCP server '#{s.name}' with no Authorization header and no auth = \"none\"; an unattended Sprite cannot answer a sign-in, so give it a header or mark it auth = \"none\" if it needs none."
+            "profile '#{s.profile}' adds #{type} MCP server '#{s.name}' with no Authorization header and neither auth = \"none\" nor auth = \"connector\"; an unattended Sprite cannot answer a sign-in, so give it a header, reach it through a connector, or mark it auth = \"none\" if it needs none."
           )
         ]
 
@@ -607,9 +716,16 @@ defmodule SpriteProfiles.Merge do
   from the Sprites API and passes it in.
 
   Each available connector is a map with `:provider` and its access policy: `allow_all`,
-  `sprite_labels` and `name_prefix`, as the Sprites API gives them. See `admits?/3`.
-  `setup_urls` maps providers to the URL where one is set up. Option `name:` is the
-  Sprite's name, for a policy with a name prefix.
+  `sprite_labels` and `name_prefix`, as the Sprites API gives them (see `admits?/3`). A
+  custom API connector also has `:name`, `:allowed_endpoints`, `:blocked_endpoints` and
+  `:base_url` (nil when the API does not report it). `setup_urls` maps providers to the URL
+  where one is set up. Option `name:` is the Sprite's name, for a policy with a name prefix.
+
+  A catalogue provider needs a connector of that provider admitting the Sprite
+  (`connector_missing`). A custom API connector needs the one named by its profile's
+  qualified name (`connector_missing`), admitting the Sprite (`connector_not_admitted`),
+  covering every declared endpoint (`connector_endpoints`) and, when known, with the
+  declared base URL (`connector_base_url`).
   """
   @spec check_connectors(Plan.t(), [map()], %{optional(String.t()) => String.t()}, keyword()) ::
           :ok | {:error, [Refusal.t()]}
@@ -617,35 +733,183 @@ defmodule SpriteProfiles.Merge do
     name = Keyword.get(opts, :name)
 
     refusals =
-      Enum.flat_map(plan.connectors, fn %{provider: provider, profiles: owners} ->
-        if Enum.any?(available, &(&1.provider == provider and admits?(&1, plan.labels, name))) do
-          []
-        else
-          where =
-            case setup_urls do
-              %{^provider => url} -> "set one up at #{url}"
-              _ -> "set one up in the Sprites dashboard"
-            end
+      Enum.flat_map(plan.connectors, fn
+        %{provider: "custom_api", name: cname} = c when is_binary(cname) ->
+          check_custom(plan, c, available, name)
 
-          labels = Enum.map_join(owners, " or ", &"profile:#{&1}")
-          picks = Enum.map(owners, &Map.get(plan.picks, &1, &1))
-          names = Enum.map_join(picks, " and ", &"'#{&1}'")
-
-          what =
-            if length(owners) > 1, do: "profiles #{names} need", else: "profile #{names} needs"
-
-          [
-            Refusal.new(
-              :connector_missing,
-              picks,
-              "#{what} a #{provider} connector that admits Sprites labelled #{labels}, and the org has none; #{where} and add that label to its access policy."
-            )
-          ]
-        end
+        c ->
+          check_catalogue(plan, c, available, setup_urls, name)
       end)
 
     if refusals == [], do: :ok, else: {:error, refusals}
   end
+
+  defp check_catalogue(plan, %{provider: provider, profiles: owners}, available, setup_urls, name) do
+    if Enum.any?(available, &(&1.provider == provider and admits?(&1, plan.labels, name))) do
+      []
+    else
+      where =
+        case setup_urls do
+          %{^provider => url} -> "set one up at #{url}"
+          _ -> "set one up in the Sprites dashboard"
+        end
+
+      labels = Enum.map_join(owners, " or ", &"profile:#{&1}")
+      picks = Enum.map(owners, &Map.get(plan.picks, &1, &1))
+      names = Enum.map_join(picks, " and ", &"'#{&1}'")
+
+      what =
+        if length(owners) > 1, do: "profiles #{names} need", else: "profile #{names} needs"
+
+      [
+        Refusal.new(
+          :connector_missing,
+          picks,
+          "#{what} a #{provider} connector that admits Sprites labelled #{labels}, and the org has none; #{where} and add that label to its access policy."
+        )
+      ]
+    end
+  end
+
+  defp check_custom(plan, c, available, sprite_name) do
+    pick = Map.get(plan.picks, c.name, c.name)
+    label = "profile:#{c.name}"
+    named = Enum.filter(available, &(&1.provider == "custom_api" and &1[:name] == c.name))
+    admitting = Enum.filter(named, &admits?(&1, plan.labels, sprite_name))
+    wanted = custom_description(c)
+    fix = "a person creates or repairs it with: mix profiles.connect -p #{pick}"
+
+    case {named, admitting} do
+      {[], _} ->
+        [
+          Refusal.new(
+            :connector_missing,
+            [pick],
+            "profile '#{pick}' needs a custom API connector named #{c.name} (#{wanted}), and the org has none; #{fix}, or in the Sprites dashboard with an access policy admitting Sprites labelled #{label}."
+          )
+        ]
+
+      {_, []} ->
+        [
+          Refusal.new(
+            :connector_not_admitted,
+            [pick],
+            "profile '#{pick}' needs the custom API connector #{c.name}, and its access policy does not admit this Sprite; it must admit Sprites labelled #{label}, so #{fix}."
+          )
+        ]
+
+      {_, [found | _]} ->
+        uncovered =
+          Enum.reject(
+            c.endpoints,
+            &endpoint_covered?(
+              &1,
+              found[:allowed_endpoints] || [],
+              found[:blocked_endpoints] || []
+            )
+          )
+
+        endpoints =
+          if uncovered == [] do
+            []
+          else
+            [
+              Refusal.new(
+                :connector_endpoints,
+                [pick],
+                "profile '#{pick}' calls #{Enum.join(uncovered, ", ")} through the custom API connector #{c.name}, and its access policy does not allow #{if length(uncovered) > 1, do: "them", else: "it"} (allowed: #{list_or_all(found[:allowed_endpoints])}; blocked: #{list_or_none(found[:blocked_endpoints])}); #{fix}."
+              )
+            ]
+          end
+
+        base =
+          if found[:base_url] in [nil, ""] or same_url?(found.base_url, c.base_url) do
+            []
+          else
+            [
+              Refusal.new(
+                :connector_base_url,
+                [pick],
+                "profile '#{pick}' reaches #{c.base_url} through the custom API connector #{c.name}, and that connector points at #{found.base_url}; #{fix}."
+              )
+            ]
+          end
+
+        endpoints ++ base
+    end
+  end
+
+  @doc "How a plan names a custom API connector's settings: base URL, auth, endpoints."
+  def custom_description(c) do
+    "base URL #{c.base_url}, auth #{auth_description(c.auth)}, endpoints #{Enum.join(c.endpoints, " ")}"
+  end
+
+  defp auth_description(%{method: "header", value: ""}), do: "header (bare token)"
+  defp auth_description(%{method: "header", value: prefix}), do: "header (#{prefix})"
+  defp auth_description(%{method: method, value: v}), do: "#{method} (#{v})"
+  defp auth_description(_), do: "header (Bearer)"
+
+  defp list_or_all(list) when list in [nil, []], do: "every path"
+  defp list_or_all(list), do: Enum.join(list, " ")
+  defp list_or_none(list) when list in [nil, []], do: "none"
+  defp list_or_none(list), do: Enum.join(list, " ")
+
+  defp same_url?(a, b), do: String.trim_trailing(a, "/") == String.trim_trailing(b, "/")
+
+  @doc """
+  The connector the launcher uses for a plan connector entry: for a custom API connector,
+  the one named by its profile that admits the Sprite; for a catalogue provider, the first
+  of that provider that admits it. Nil when there is none.
+  """
+  def find_connector(entry, available, labels, sprite_name) do
+    Enum.find(available, fn a ->
+      a.provider == entry.provider and
+        (entry[:name] == nil or a[:name] == entry.name) and
+        admits?(a, labels, sprite_name)
+    end)
+  end
+
+  @doc """
+  True when a connector's endpoint rules let a Sprite call every path the declared pattern
+  names. `declared` is `/exact` or `/prefix*`. It is covered when `allowed` is empty (Fly
+  then allows every path) or holds a pattern covering it: the same pattern, or `/p*` where
+  `p` is a prefix of the declared pattern's literal part. And no `blocked` pattern may
+  overlap it, compared without regard to case, as Fly blocks.
+  """
+  @spec endpoint_covered?(String.t(), [String.t()], [String.t()]) :: boolean()
+  def endpoint_covered?(declared, allowed, blocked) do
+    allowed? = allowed == [] or Enum.any?(allowed, &allow_covers?(&1, declared))
+    allowed? and not Enum.any?(blocked, &overlaps?(&1, declared))
+  end
+
+  defp allow_covers?(same, same), do: true
+
+  defp allow_covers?(allow, declared) do
+    case wildcard(allow) do
+      {:prefix, p} -> String.starts_with?(literal(declared), p)
+      {:exact, _} -> false
+    end
+  end
+
+  defp overlaps?(block, declared) do
+    {bk, b} = wildcard(String.downcase(block))
+    {dk, d} = wildcard(String.downcase(declared))
+
+    case {bk, dk} do
+      {:exact, :exact} -> b == d
+      {:prefix, :exact} -> String.starts_with?(d, b)
+      {:exact, :prefix} -> String.starts_with?(b, d)
+      {:prefix, :prefix} -> String.starts_with?(d, b) or String.starts_with?(b, d)
+    end
+  end
+
+  defp wildcard(pattern) do
+    if String.ends_with?(pattern, "*"),
+      do: {:prefix, String.trim_trailing(pattern, "*")},
+      else: {:exact, pattern}
+  end
+
+  defp literal(pattern), do: elem(wildcard(pattern), 1)
 
   @doc """
   True when a connector's access policy admits a Sprite with `labels` and `name`, by the

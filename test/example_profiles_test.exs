@@ -10,7 +10,7 @@ defmodule SpriteProfiles.ExampleProfilesTest do
       assert errors == []
 
       assert Enum.map(profiles, & &1.name) ==
-               ~w(anthropic-key claude-code github playwright preview)
+               ~w(anthropic-key claude-code github github-mcp playwright preview)
     end
 
     test "no secret appears outside a privileged profile" do
@@ -34,6 +34,8 @@ defmodule SpriteProfiles.ExampleProfilesTest do
           ~w(claude-code github),
           ~w(claude-code github playwright),
           ~w(claude-code anthropic-key),
+          ~w(claude-code github-mcp),
+          ~w(claude-code github github-mcp),
           ~w(preview)
         ] do
       test "#{Enum.join(set, " + ")} merges for a person", %{by_name: by_name} do

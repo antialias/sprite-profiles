@@ -10,6 +10,7 @@ defmodule Mix.Tasks.Profiles.Launch do
       mix profiles.launch -p claude-code -p github --dry-run
       mix profiles.launch -p claude-code -p anthropic-key --destroy-on-failure
       mix profiles.launch --lock sprite-profiles.lock --name demo-3
+      mix profiles.launch -p claude-code -p github-mcp -i readonly=true
 
   Options:
 
@@ -17,6 +18,8 @@ defmodule Mix.Tasks.Profiles.Launch do
       (`owner/repo[/path]@ref`); repeat it, in the order to apply them
     * `--lock` - a lock file written by `mix profiles.lock`, instead of `--profile`; the
       launch uses its commits and resolves no ref
+    * `--input`, `-i` - `name=value` for one of the set's inputs; repeat it. An input not
+      given takes its default. Not with `--lock`, which holds its own
     * `--offline` - fetch nothing: every address must be pinned and cached
     * `--name` - the Sprite's name (default: the picks joined by '-', then 4 hex digits)
     * `--dry-run` - resolve the set and print the plan; create nothing
@@ -45,9 +48,10 @@ defmodule Mix.Tasks.Profiles.Launch do
     secrets_dir: :string,
     adapter: :string,
     lock: :string,
-    offline: :boolean
+    offline: :boolean,
+    input: :keep
   ]
-  @aliases [p: :profile]
+  @aliases [p: :profile, i: :input]
 
   @impl Mix.Task
   def run(argv) do
@@ -76,7 +80,7 @@ defmodule Mix.Tasks.Profiles.Launch do
 
   defp usage_error(extra, prefix \\ "not understood: ") do
     Mix.shell().error(
-      "usage: mix profiles.launch (--profile PICK [--profile PICK ...] | --lock FILE) [--offline] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]" <>
+      "usage: mix profiles.launch (--profile PICK [--profile PICK ...] [-i NAME=VALUE ...] | --lock FILE) [--offline] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]" <>
         if(extra == "", do: "", else: "\n" <> prefix <> extra)
     )
 

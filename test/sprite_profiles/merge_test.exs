@@ -91,8 +91,8 @@ defmodule SpriteProfiles.MergeTest do
 
     test "union by provider, remembering every profile that needs it", %{plan: plan} do
       assert plan.connectors == [
-               %{provider: "github", profiles: ["github", "ci"]},
-               %{provider: "slack", profiles: ["ci"]}
+               %{provider: "github", name: nil, profiles: ["github", "ci"]},
+               %{provider: "slack", name: nil, profiles: ["ci"]}
              ]
     end
 
@@ -594,6 +594,248 @@ defmodule SpriteProfiles.MergeTest do
 
       assert [%{dest: ".claude/skills/acme.linear--triage/", profile: "acme.linear"}] =
                plan.skills
+    end
+  end
+
+  ## format 2
+
+  @input_toml """
+  format = 2
+  [inputs.mode]
+  summary = "fast or slow"
+  default = "fast"
+  pattern = '^(fast|slow)$'
+  [env]
+  MODE = { from = "input", name = "mode" }
+  """
+
+  @required_toml """
+  format = 2
+  [inputs.repo]
+  summary = "the repository"
+  [env]
+  REPO = { from = "input", name = "repo" }
+  """
+
+  defp custom_toml(base \\ "https://api.example.com", endpoints \\ ~s(["/v1/*"])) do
+    """
+    format = 2
+    [[connectors]]
+    provider  = "custom_api"
+    base_url  = "#{base}"
+    endpoints = #{endpoints}
+    [env]
+    API_URL = { from = "connector", provider = "custom_api" }
+    """
+  end
+
+  describe "inputs" do
+    test "a default applies, and the plan says so" do
+      plan = merge!([profile!("aa", @input_toml)])
+      assert plan.env["MODE"] == %{value: "fast", profile: "aa"}
+      assert plan.inputs == [%{name: "mode", value: "fast", default: true, profile: "aa"}]
+      assert Plan.format(plan) =~ ~s<Inputs:\n  mode = "fast" (default)  (aa)>
+      assert Plan.format(plan) =~ ~s<MODE = "fast"  (aa)>
+    end
+
+    test "a given value wins over the default" do
+      plan = merge!([profile!("aa", @input_toml)], inputs: %{"mode" => "slow"})
+      assert plan.env["MODE"].value == "slow"
+      assert [%{value: "slow", default: false}] = plan.inputs
+      refute Plan.format(plan) =~ "(default)"
+    end
+
+    test "a name two profiles declare is input_collision" do
+      other = String.replace(@input_toml, "MODE =", "OTHER_MODE =")
+      [r] = refusals([profile!("aa", @input_toml), profile!("bb", other)])
+      assert r.code == :input_collision
+      assert r.message =~ "profiles 'aa' and 'bb' both declare input mode"
+    end
+
+    test "a required input with no value is input_missing, naming -i" do
+      [r] = refusals([profile!("aa", @required_toml)])
+      assert r.code == :input_missing
+      assert r.message =~ "-i repo=VALUE"
+    end
+
+    test "a value failing the pattern or too long is input_invalid" do
+      [r] = refusals([profile!("aa", @input_toml)], inputs: %{"mode" => "medium"})
+      assert r.code == :input_invalid
+      assert r.message =~ ~s<"medium" does not match its pattern '^(fast|slow)$'>
+
+      long = String.duplicate("a", 257)
+      [r] = refusals([profile!("aa", @required_toml)], inputs: %{"repo" => long})
+      assert r.code == :input_invalid
+      assert r.message =~ "at most 256"
+
+      [r] = refusals([profile!("aa", @required_toml)], inputs: %{"repo" => "a\nb"})
+      assert r.code == :input_invalid
+    end
+
+    test "a value for a name no profile declares is input_unknown" do
+      [r] = refusals([profile!("aa", @input_toml)], inputs: %{"mdoe" => "fast"})
+      assert r.code == :input_unknown
+      assert r.message =~ "the set's inputs are mode"
+    end
+  end
+
+  describe "custom API connectors in the plan" do
+    test "each profile's own, named by its qualified name" do
+      a = profile!("aa", custom_toml())
+
+      b = %{
+        profile!("bb", String.replace(custom_toml("https://api.other.com"), "API_URL", "B_URL"))
+        | qualified: "acme.bb",
+          pick: "acme/p/bb@v1"
+      }
+
+      plan = merge!([a, b])
+
+      assert [%{name: "aa", provider: "custom_api"}, %{name: "acme.bb", profiles: ["acme.bb"]}] =
+               plan.connectors
+
+      text = Plan.format(plan)
+
+      assert text =~
+               "custom_api aa  (aa): base URL https://api.example.com, auth header (Bearer), endpoints /v1/*"
+
+      assert text =~ "custom_api acme.bb  (acme/p/bb@v1): base URL https://api.other.com"
+    end
+
+    test "an MCP server with auth = \"connector\" is not mcp_needs_login" do
+      toml =
+        custom_toml() <> ~s([claude.mcp_servers.x]\nurl = "${API_URL}/mcp"\nauth = "connector"\n)
+
+      plan = merge!([profile!("aa", toml)])
+      assert Plan.format(plan) =~ "x (http) ${API_URL}/mcp, credential added by the gateway  (aa)"
+    end
+
+    test "requires_env still catches an undefined ${KEY}" do
+      toml =
+        custom_toml() <>
+          ~s([claude.mcp_servers.x]\nurl = "${API_URL}/mcp"\nauth = "connector"\nheaders = { X-A = "${NOPE}" }\n)
+
+      [r] = refusals([profile!("aa", toml)])
+      assert r.code == :mcp_needs_login
+      assert r.message =~ "NOPE"
+    end
+  end
+
+  describe "check_connectors, custom API" do
+    defp custom_plan(toml \\ custom_toml()) do
+      p = %{profile!("mcp", toml) | qualified: "acme.mcp", pick: "acme/profiles/mcp@v1"}
+      merge!([p])
+    end
+
+    defp org(overrides) do
+      Map.merge(
+        %{
+          id: "conn_9",
+          provider: "custom_api",
+          name: "acme.mcp",
+          allow_all: false,
+          sprite_labels: ["profile:acme.mcp"],
+          name_prefix: nil,
+          allowed_endpoints: ["/v1/*"],
+          blocked_endpoints: [],
+          base_url: "https://api.example.com"
+        },
+        overrides
+      )
+    end
+
+    test "matches by provider and name" do
+      assert :ok = Merge.check_connectors(custom_plan(), [org(%{})])
+    end
+
+    test "another name is connector_missing, naming the command with the pick as written" do
+      {:error, [r]} = Merge.check_connectors(custom_plan(), [org(%{name: "mcp"})])
+      assert r.code == :connector_missing
+      assert r.profiles == ["acme/profiles/mcp@v1"]
+      assert r.message =~ "a custom API connector named acme.mcp"
+
+      assert r.message =~
+               "base URL https://api.example.com, auth header (Bearer), endpoints /v1/*"
+
+      assert r.message =~ "mix profiles.connect -p acme/profiles/mcp@v1"
+      assert r.message =~ "labelled profile:acme.mcp"
+
+      {:error, [r]} = Merge.check_connectors(custom_plan(), [org(%{provider: "github"})])
+      assert r.code == :connector_missing
+    end
+
+    test "a connector that does not admit the Sprite is connector_not_admitted" do
+      {:error, [r]} =
+        Merge.check_connectors(custom_plan(), [org(%{sprite_labels: ["profile:other"]})])
+
+      assert r.code == :connector_not_admitted
+      assert r.message =~ "mix profiles.connect -p acme/profiles/mcp@v1"
+
+      assert :ok =
+               Merge.check_connectors(custom_plan(), [org(%{sprite_labels: [], allow_all: true})])
+    end
+
+    test "an endpoint the policy does not cover is connector_endpoints" do
+      {:error, [r]} =
+        Merge.check_connectors(custom_plan(), [org(%{allowed_endpoints: ["/other"]})])
+
+      assert r.code == :connector_endpoints
+      assert r.message =~ "calls /v1/* through the custom API connector acme.mcp"
+      assert r.message =~ "allowed: /other; blocked: none"
+
+      {:error, [r]} =
+        Merge.check_connectors(custom_plan(), [org(%{blocked_endpoints: ["/V1/admin*"]})])
+
+      assert r.code == :connector_endpoints
+    end
+
+    test "a base URL that differs is connector_base_url; a trailing slash does not" do
+      {:error, [r]} =
+        Merge.check_connectors(custom_plan(), [org(%{base_url: "https://evil.example.com"})])
+
+      assert r.code == :connector_base_url
+      assert r.message =~ "points at https://evil.example.com"
+
+      assert :ok =
+               Merge.check_connectors(custom_plan(), [
+                 org(%{base_url: "https://api.example.com/"})
+               ])
+
+      assert :ok = Merge.check_connectors(custom_plan(), [org(%{base_url: nil})])
+    end
+
+    test "find_connector picks the named one that admits the Sprite" do
+      plan = custom_plan()
+      [entry] = plan.connectors
+      wanted = org(%{})
+      others = [org(%{id: "c1", name: "x"}), org(%{id: "c2", sprite_labels: ["no"]})]
+      assert Merge.find_connector(entry, others ++ [wanted], plan.labels, "demo") == wanted
+    end
+  end
+
+  describe "endpoint_covered?" do
+    for {declared, allowed, blocked, want} <- [
+          {"/a", ["/a"], [], true},
+          {"/a", ["/b"], [], false},
+          {"/a/b", ["/a*"], [], true},
+          {"/a/b*", ["/a*"], [], true},
+          {"/a*", ["/a/b*"], [], false},
+          {"/a*", ["/a"], [], false},
+          {"/a", ["/a*"], [], true},
+          {"/anything/x", [], [], true},
+          {"/a/b", [], ["/a/b"], false},
+          {"/a/b", [], ["/a*"], false},
+          {"/a*", [], ["/a/secret"], false},
+          {"/a*", [], ["/a/secret*"], false},
+          {"/a/b", [], ["/A/B"], false},
+          {"/a/b", ["/a*"], ["/a/c"], true},
+          {"/mcp/*", ["/mcp/*"], [], true},
+          {"/mcp/*", ["/mcp/"], [], false}
+        ] do
+      test "#{declared} with allowed #{inspect(allowed)} and blocked #{inspect(blocked)} is #{want}" do
+        assert Merge.endpoint_covered?(unquote(declared), unquote(allowed), unquote(blocked)) ==
+                 unquote(want)
+      end
     end
   end
 end

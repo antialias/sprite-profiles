@@ -21,15 +21,29 @@ defmodule SpriteProfiles.Sprites do
   @type connector :: %{
           id: String.t(),
           provider: String.t(),
+          name: String.t() | nil,
           allow_all: boolean(),
           sprite_labels: [String.t()],
-          name_prefix: String.t() | nil
+          name_prefix: String.t() | nil,
+          allowed_endpoints: [String.t()],
+          blocked_endpoints: [String.t()],
+          base_url: String.t() | nil
         }
+
+  @typedoc "The outcome of a custom API connector's credential test."
+  @type test_result :: %{status: String.t(), message: String.t() | nil}
 
   @type config :: term()
   @type error :: {:error, String.t()}
 
   @callback list_connectors(config) :: {:ok, [connector]} | error
+  @doc """
+  Creates a custom API connector, or updates the one of the same name in place. `body` holds
+  the credential: an adapter sends it once and never logs it, writes it to disk, puts it in
+  a process's arguments or returns it in an error.
+  """
+  @callback create_custom_connector(config, body :: map()) :: {:ok, connector} | error
+  @callback test_custom_connector(config, id :: String.t()) :: {:ok, test_result} | error
   @callback create(config, name :: String.t(), labels :: [String.t()]) :: {:ok, info} | error
   @callback get(config, name :: String.t()) :: {:ok, info} | error
   @callback set_labels(config, name :: String.t(), labels :: [String.t()]) :: {:ok, info} | error
@@ -58,6 +72,13 @@ defmodule SpriteProfiles.Sprites do
   def new(adapter, config \\ []), do: %__MODULE__{adapter: adapter, config: config}
 
   def list_connectors(%__MODULE__{adapter: a, config: c}), do: a.list_connectors(c)
+
+  def create_custom_connector(%__MODULE__{adapter: a, config: c}, body),
+    do: a.create_custom_connector(c, body)
+
+  def test_custom_connector(%__MODULE__{adapter: a, config: c}, id),
+    do: a.test_custom_connector(c, id)
+
   def create(%__MODULE__{adapter: a, config: c}, name, labels), do: a.create(c, name, labels)
   def get(%__MODULE__{adapter: a, config: c}, name), do: a.get(c, name)
 

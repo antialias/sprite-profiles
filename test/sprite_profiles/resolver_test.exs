@@ -60,7 +60,7 @@ defmodule SpriteProfiles.ResolverTest do
   test "a newer format is one refusal, not a flood of unknown fields", %{opts: opts} do
     assert {:error, [e]} = Resolver.find(["acme/profiles/future@v1"], ["profiles"], opts)
     assert e.code == :unsupported_format
-    assert e.message =~ "profile 'acme/profiles/future@v1' is format 2"
+    assert e.message =~ "profile 'acme/profiles/future@v1' is format 3"
   end
 
   test "an addresses-only set does not need the search path to exist", %{opts: opts} do

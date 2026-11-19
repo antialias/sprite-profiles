@@ -31,24 +31,52 @@ defmodule SpriteProfiles.Sprites.Rest do
       "http_port" => spec.http_port
     }
     |> then(fn body -> if spec[:dir], do: Map.put(body, "dir", spec.dir), else: body end)
-  end
-
-  @doc "Normalizes the connector list to `t:SpriteProfiles.Sprites.connector/0`."
-  def connectors(%{"connections" => list}) when is_list(list) do
-    Enum.map(list, fn c ->
-      policy = c["access_policy"] || %{}
-
-      %{
-        id: c["id"],
-        provider: c["provider"],
-        allow_all: policy["allow_all"] == true,
-        sprite_labels: policy["sprite_labels"] || [],
-        name_prefix: blank_nil(policy["name_prefix"])
-      }
+    |> then(fn body ->
+      if spec[:env] in [nil, %{}], do: body, else: Map.put(body, "env", spec.env)
     end)
   end
 
+  @doc "Where a custom API connector is created, or updated in place by name."
+  def custom_connector_path, do: "/v1/oauth/connections/custom_api"
+
+  @doc "Where a stored custom API connector's credential is tested."
+  def custom_connector_test_path, do: "/v1/oauth/connections/custom_api/test"
+
+  @doc """
+  Normalizes the connector list to `t:SpriteProfiles.Sprites.connector/0`. A connector's
+  name comes back as `provider_account_name`; a custom API connector's base URL sits in
+  `provider_info`.
+  """
+  def connectors(%{"connections" => list}) when is_list(list), do: Enum.map(list, &connector/1)
   def connectors(_), do: []
+
+  @doc "One connector, as `connectors/1` normalizes it."
+  def connector(c) do
+    policy = c["access_policy"] || %{}
+    info = if is_map(c["provider_info"]), do: c["provider_info"], else: %{}
+
+    %{
+      id: c["id"],
+      provider: c["provider"],
+      name: c["provider_account_name"],
+      allow_all: policy["allow_all"] == true,
+      sprite_labels: policy["sprite_labels"] || [],
+      name_prefix: blank_nil(policy["name_prefix"]),
+      allowed_endpoints: policy["allowed_endpoints"] || [],
+      blocked_endpoints: policy["blocked_endpoints"] || [],
+      base_url: blank_nil(info["base_api_url"] || info["base_url"])
+    }
+  end
+
+  @doc "The connector in a create answer (`{\"connection\": {...}}`)."
+  def created_connector(%{"connection" => %{} = c}), do: {:ok, connector(c)}
+  def created_connector(_), do: {:error, "the Sprites API did not return the connector"}
+
+  @doc "The outcome in a test answer (`{\"result\": {\"status\": ..., \"message\": ...}}`)."
+  def test_result(%{"result" => %{} = r}),
+    do: {:ok, %{status: to_string(r["status"]), message: r["message"]}}
+
+  def test_result(_), do: {:error, "the Sprites API did not return a test result"}
 
   defp blank_nil(""), do: nil
   defp blank_nil(v), do: v

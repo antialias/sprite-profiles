@@ -384,4 +384,127 @@ defmodule SpriteProfiles.LauncherTest do
     {:ok, plan, _, _} = Launcher.resolve(["claude-code", "preview"])
     assert Launcher.default_name(plan) =~ ~r/^claude-code-preview-[0-9a-f]{4}$/
   end
+
+  describe "inputs, a custom API connector and service env" do
+    @echo """
+    format  = 2
+    name    = "echo"
+    summary = "an echo API through a custom connector"
+
+    [inputs.greeting]
+    summary = "what to say"
+
+    [env]
+    ECHO_URL      = { from = "connector", provider = "custom_api" }
+    ECHO_GREETING = { from = "input", name = "greeting" }
+
+    [[connectors]]
+    provider  = "custom_api"
+    base_url  = "https://echo.example.com"
+    endpoints = ["/anything/*"]
+
+    [[services]]
+    name = "echo"
+    cmd  = "sleep"
+    args = ["600"]
+    """
+
+    setup ctx do
+      dir = Path.join(ctx.tmp_dir, "profiles")
+      File.mkdir_p!(Path.join(dir, "echo"))
+      File.write!(Path.join([dir, "echo", "profile.toml"]), @echo)
+      File.mkdir_p!(Path.join(ctx.tmp_dir, "secrets"))
+      File.write!(Path.join([ctx.tmp_dir, "secrets", "ANTHROPIC_API_KEY"]), "sk-test-not-real\n")
+
+      connector = %{
+        id: "conn_e",
+        provider: "custom_api",
+        name: "echo",
+        allow_all: false,
+        sprite_labels: ["profile:echo"],
+        name_prefix: nil,
+        allowed_endpoints: ["/anything/*"],
+        blocked_endpoints: [],
+        base_url: "https://echo.example.com"
+      }
+
+      %{dirs: [Path.expand("profiles"), dir], connector: connector}
+    end
+
+    defp launch_echo(ctx, respond, extra \\ []) do
+      {sprites, log} = FakeSprites.start(respond)
+
+      result =
+        Launcher.launch(
+          ["echo", "anthropic-key"],
+          opts(ctx, sprites, [dirs: ctx.dirs, inputs: %{"greeting" => "kia ora"}] ++ extra)
+        )
+
+      {result, log}
+    end
+
+    test "the gateway URL and the input value reach the env file; the service gets its phase's env",
+         ctx do
+      {{:ok, record}, log} =
+        launch_echo(ctx, fn
+          {:list_connectors, []} -> {:ok, [ctx.connector]}
+          _ -> :default
+        end)
+
+      assert record.outcome == :ok
+      assert record.inputs == %{"greeting" => "kia ora"}
+      assert record.connectors == ["custom_api echo"]
+
+      envs =
+        for [_, "/home/sprite/.config/profiled/env.sh", content, 0o600] <-
+              FakeSprites.calls(log, :write_file),
+            do: content
+
+      [checkpointed, all] = envs
+
+      assert checkpointed =~
+               "export ECHO_URL='https://api.sprites.dev/v1/gateway/custom_api/conn_e'"
+
+      assert checkpointed =~ "export ECHO_GREETING='kia ora'"
+      refute checkpointed =~ "ANTHROPIC_API_KEY"
+      assert all =~ "ANTHROPIC_API_KEY"
+
+      [[_, "echo", spec]] = FakeSprites.calls(log, :put_service)
+
+      assert spec.env == %{
+               "ECHO_GREETING" => "kia ora",
+               "ECHO_URL" => "https://api.sprites.dev/v1/gateway/custom_api/conn_e"
+             }
+
+      assert %{"env" => %{"ECHO_GREETING" => "kia ora"}} =
+               SpriteProfiles.Sprites.Rest.service_body(spec)
+
+      record_json = File.read!(record.record_path)
+      assert record_json =~ ~s("greeting": "kia ora")
+      refute record_json =~ "sk-test-not-real"
+    end
+
+    test "a missing required input is refused before any call", ctx do
+      {sprites, log} = FakeSprites.start()
+
+      assert {:error, [r]} =
+               Launcher.launch(["echo"], opts(ctx, sprites, dirs: ctx.dirs))
+
+      assert r.code == :input_missing
+      assert FakeSprites.calls(log) == []
+    end
+
+    test "a connector that does not cover the endpoints refuses before create", ctx do
+      narrowed = %{ctx.connector | allowed_endpoints: ["/get"]}
+
+      {{:error, [r]}, log} =
+        launch_echo(ctx, fn
+          {:list_connectors, []} -> {:ok, [narrowed]}
+          _ -> :default
+        end)
+
+      assert r.code == :connector_endpoints
+      assert Enum.map(FakeSprites.calls(log), &elem(&1, 0)) == [:list_connectors]
+    end
+  end
 end

@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Profiles.Plan do
       mix profiles.plan -p preview -p claude-code --dir path/to/profiles
       mix profiles.plan -p claude-code -p antialias/sprite-profiles/profiles/preview@main
       mix profiles.plan --lock sprite-profiles.lock --offline
+      mix profiles.plan -p claude-code -p github-mcp -i readonly=false
 
   Options:
 
@@ -23,6 +24,8 @@ defmodule Mix.Tasks.Profiles.Plan do
     * `--dir` - a folder holding profiles; repeat it to search several. With no `--dir` and
       no `SPRITE_PROFILES_PATH`, the search path is `profiles` plus
       `~/.config/sprite-profiles/profiles` when it exists
+    * `--input`, `-i` - `name=value` for one of the set's inputs; repeat it. An input not
+      given takes its default. Not with `--lock`, which holds its own
     * `--agent` - judge the set as an agent would launch it (privileged sets are refused)
 
   Exits 1 when the set is refused or a profile is invalid, 2 on bad usage.
@@ -32,8 +35,15 @@ defmodule Mix.Tasks.Profiles.Plan do
 
   alias SpriteProfiles.{Merge, Plan, ProfilePath, Resolver, SetArgs}
 
-  @switches [profile: :keep, dir: :keep, agent: :boolean, lock: :string, offline: :boolean]
-  @aliases [p: :profile]
+  @switches [
+    profile: :keep,
+    dir: :keep,
+    agent: :boolean,
+    lock: :string,
+    offline: :boolean,
+    input: :keep
+  ]
+  @aliases [p: :profile, i: :input]
 
   @impl Mix.Task
   def run(argv) do
@@ -59,7 +69,7 @@ defmodule Mix.Tasks.Profiles.Plan do
 
   defp usage(extra) do
     Mix.shell().error(
-      "usage: mix profiles.plan (--profile PICK [--profile PICK ...] | --lock FILE) [--offline] [--dir DIR ...] [--agent]" <>
+      "usage: mix profiles.plan (--profile PICK [--profile PICK ...] [-i NAME=VALUE ...] | --lock FILE) [--offline] [--dir DIR ...] [--agent]" <>
         if(extra == "", do: "", else: "\n" <> extra)
     )
 
@@ -75,7 +85,7 @@ defmodule Mix.Tasks.Profiles.Plan do
   defp plan(picks, opts) do
     with :ok <- Merge.check_picks(picks),
          {:ok, profiles} <- Resolver.find(picks, opts[:dirs], opts),
-         {:ok, plan} <- Merge.merge(profiles, caller: opts[:caller]) do
+         {:ok, plan} <- Merge.merge(profiles, caller: opts[:caller], inputs: opts[:inputs] || %{}) do
       Mix.shell().info(Plan.format(plan))
     else
       {:error, problems} -> refused(problems)

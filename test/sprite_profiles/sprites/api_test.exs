@@ -193,4 +193,59 @@ defmodule SpriteProfiles.Sprites.ApiTest do
     assert message =~ "answered 404 to DELETE /v1/sprites/demo-1"
     refute message =~ @token
   end
+
+  test "list_connectors keeps a custom connector's name, endpoint lists and base URL" do
+    cfg =
+      stub(:api_custom_list, fn conn ->
+        Req.Test.json(conn, %{
+          "connections" => [
+            %{
+              "id" => "conn_3",
+              "provider" => "custom_api",
+              "provider_account_name" => "acme.mcp",
+              "provider_info" => %{"base_api_url" => "https://api.example.com"},
+              "access_policy" => %{
+                "sprite_labels" => ["profile:acme.mcp"],
+                "allowed_endpoints" => ["/mcp/*"],
+                "blocked_endpoints" => ["/mcp/admin*"]
+              }
+            }
+          ]
+        })
+      end)
+
+    assert {:ok,
+            [
+              %{
+                name: "acme.mcp",
+                allowed_endpoints: ["/mcp/*"],
+                blocked_endpoints: ["/mcp/admin*"],
+                base_url: "https://api.example.com"
+              }
+            ]} = Api.list_connectors(cfg)
+  end
+
+  test "create_custom_connector posts the body; test_custom_connector sends the id" do
+    cfg =
+      stub(:api_custom_create, fn conn ->
+        case conn.request_path do
+          "/v1/oauth/connections/custom_api" ->
+            assert Jason.decode!(body(conn))["name"] == "acme.mcp"
+
+            conn
+            |> Plug.Conn.put_status(201)
+            |> Req.Test.json(%{"connection" => %{"id" => "conn_4", "provider" => "custom_api"}})
+
+          "/v1/oauth/connections/custom_api/test" ->
+            assert Jason.decode!(body(conn)) == %{"connection_id" => "conn_4"}
+            Req.Test.json(conn, %{"result" => %{"status" => "error", "message" => "HTTP 401"}})
+        end
+      end)
+
+    assert {:ok, %{id: "conn_4"}} =
+             Api.create_custom_connector(cfg, %{"name" => "acme.mcp", "access_token" => "x"})
+
+    assert {:ok, %{status: "error", message: "HTTP 401"}} =
+             Api.test_custom_connector(cfg, "conn_4")
+  end
 end

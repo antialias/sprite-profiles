@@ -1,0 +1,47 @@
+format      = 2
+name        = "github-mcp"
+summary     = "GitHub's remote MCP server through a connector; no token in the Sprite"
+description = """
+Registers GitHub's remote MCP server (api.githubcopilot.com) in Claude Code, reached \
+through a custom API connector in your org that holds a personal access token. The \
+Sprite never sees the token: the gateway adds it. Create the connector once with \
+`mix profiles.connect -p github-mcp`, using a fine-grained token with only the \
+repositories and permissions you want agents to have. Inputs choose the toolsets and \
+whether write tools are offered; the token's permissions are the real limit."""
+
+[inputs.toolsets]
+summary = "Toolsets, comma-separated (repos,issues,...); empty = GitHub's default set"
+default = ""
+pattern = '^([a-z_]+(,[a-z_]+)*)?$'
+
+[inputs.readonly]
+summary = "true: only read tools; false: write tools too (the token must allow them)"
+default = "true"
+pattern = '^(true|false)$'
+
+[env]
+GITHUB_MCP_URL      = { from = "connector", provider = "custom_api" }
+GITHUB_MCP_TOOLSETS = { from = "input", name = "toolsets" }
+GITHUB_MCP_READONLY = { from = "input", name = "readonly" }
+
+[policy]
+rules = [
+  { include = "defaults" },
+  { action = "allow", domain = "api.sprites.dev" },
+]
+
+[[connectors]]
+provider  = "custom_api"
+base_url  = "https://api.githubcopilot.com"
+auth      = { method = "header", prefix = "Bearer" }
+endpoints = ["/mcp/*"]
+test_url  = "https://api.github.com/user"
+
+[claude.mcp_servers.github]
+type = "http"
+url  = "${GITHUB_MCP_URL}/mcp/"
+auth = "connector"
+
+[claude.mcp_servers.github.headers]
+X-MCP-Toolsets = "${GITHUB_MCP_TOOLSETS}"
+X-MCP-Readonly = "${GITHUB_MCP_READONLY}"

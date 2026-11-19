@@ -70,4 +70,34 @@ defmodule Mix.Tasks.Profiles.PlanTest do
       assert catch_exit(Plan.run(["--bogus"])) == {:shutdown, 2}
     end)
   end
+
+  test "-i sets an input; a bad one is refused; --lock with -i is bad usage" do
+    Plan.run(["-p", "claude-code", "-p", "github-mcp", "-i", "readonly=false"])
+    out = output()
+    assert out =~ ~s<readonly = "false"  (github-mcp)>
+    assert out =~ ~s<toolsets = "" (default)  (github-mcp)>
+    assert out =~ ~s(GITHUB_MCP_READONLY = "false")
+
+    assert catch_exit(Plan.run(["-p", "github-mcp", "-i", "readonly=maybe"])) == {:shutdown, 1}
+    assert output() =~ "[input_invalid]"
+
+    capture_io(:stderr, fn ->
+      assert catch_exit(Plan.run(["--lock", "x.lock", "-i", "readonly=true"])) == {:shutdown, 2}
+    end)
+  end
+
+  @tag :tmp_dir
+  test "mix profiles.lock -i records the inputs, and a locked plan uses them", %{tmp_dir: tmp} do
+    path = Path.join(tmp, "set.lock")
+
+    Mix.Tasks.Profiles.Lock.run(
+      ~w(-p claude-code -p github-mcp -i toolsets=repos,issues -o) ++ [path]
+    )
+
+    _ = output()
+    assert File.read!(path) =~ "[inputs]\ntoolsets = \"repos,issues\""
+
+    Plan.run(["--lock", path])
+    assert output() =~ ~s(GITHUB_MCP_TOOLSETS = "repos,issues")
+  end
 end

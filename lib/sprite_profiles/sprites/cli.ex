@@ -25,6 +25,21 @@ defmodule SpriteProfiles.Sprites.Cli do
     end
   end
 
+  # The body holds the credential, so it goes to curl on standard input (`--data-binary
+  # @-`), never in the arguments, where `ps` would show it, and never through a file.
+  @impl true
+  def create_custom_connector(cfg, body) do
+    with {:ok, json} <- api(cfg, "POST", Rest.custom_connector_path(), {:stdin, body}),
+         do: Rest.created_connector(json)
+  end
+
+  @impl true
+  def test_custom_connector(cfg, id) do
+    with {:ok, json} <-
+           api(cfg, "POST", Rest.custom_connector_test_path(), %{"connection_id" => id}),
+         do: Rest.test_result(json)
+  end
+
   @impl true
   def create(cfg, name, labels) do
     with {:ok, json} <- api(cfg, "POST", Rest.sprites_path(), Rest.create_body(name, labels)) do
@@ -115,6 +130,7 @@ defmodule SpriteProfiles.Sprites.Cli do
     data =
       case body do
         nil -> []
+        {:stdin, _} -> ["-H", "Content-Type: application/json", "--data-binary", "@-"]
         body -> ["-H", "Content-Type: application/json", "-d", Jason.encode!(body)]
       end
 
@@ -122,7 +138,13 @@ defmodule SpriteProfiles.Sprites.Cli do
   end
 
   defp api(cfg, method, path, body \\ nil, opts \\ []) do
-    {out, code} = run(cfg, api_args(method, path, body), :discard)
+    stderr =
+      case body do
+        {:stdin, data} -> {:stdin, Jason.encode!(data)}
+        _ -> :discard
+      end
+
+    {out, code} = run(cfg, api_args(method, path, body), stderr)
     {payload, status} = split_status(out)
 
     cond do
@@ -182,4 +204,30 @@ defmodule SpriteProfiles.Sprites.Cli do
   # `sprite api` writes "Calling API: ..." and curl's own messages to stderr.
   def default_runner(bin, args, :discard),
     do: System.cmd("/bin/sh", ["-c", ~s("$0" "$@" 2>/dev/null), bin | args])
+
+  # `data` goes to the command's standard input, and stderr is discarded. A port cannot
+  # close its child's stdin alone, so `head -c` passes exactly the body on and then ends,
+  # which gives the command its end of input.
+  def default_runner(bin, args, {:stdin, data}) do
+    script = ~s(head -c #{byte_size(data)} | "$0" "$@" 2>/dev/null)
+
+    port =
+      Port.open({:spawn_executable, "/bin/sh"}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :hide,
+        args: ["-c", script, bin | args]
+      ])
+
+    Port.command(port, data)
+    collect(port, [])
+  end
+
+  defp collect(port, acc) do
+    receive do
+      {^port, {:data, chunk}} -> collect(port, [chunk | acc])
+      {^port, {:exit_status, code}} -> {acc |> Enum.reverse() |> IO.iodata_to_binary(), code}
+    end
+  end
 end

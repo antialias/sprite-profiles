@@ -14,7 +14,10 @@ defmodule SpriteProfiles.Refusal do
   `archive_too_large`, `bad_archive`; `bad_lock`; `profile_collision`, `label_too_long`,
   `env_collision`, `service_collision`, `http_port_conflict`,
   `mcp_server_collision`, `mcp_needs_login`, `settings_collision`, `file_collision`,
-  `connector_missing`, `not_for_agents`; at launch also `secret_missing` and `bad_sprite_name`.
+  `connector_missing`, `not_for_agents`; inputs `input_collision`, `input_missing`,
+  `input_invalid`, `input_unknown`; at launch also `secret_missing`, `bad_sprite_name`,
+  `connector_not_admitted`, `connector_endpoints` and `connector_base_url`; from
+  `mix profiles.connect`, `no_custom_connector` and `needs_terminal`.
   """
 
   @enforce_keys [:code, :message]

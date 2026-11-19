@@ -64,7 +64,7 @@ defmodule SpriteProfiles.GitHubFixtures do
       {"#{top}/linear/claude/skills/triage/SKILL.md", "---\nname: triage\n---\nTriage.\n"},
       {"#{top}/wrong/profile.toml", toml("not-wrong")},
       {"#{top}/future/profile.toml",
-       "format = 2\nname = \"future\"\nsummary = \"x\"\nnew_thing = 1\n"}
+       "format = 3\nname = \"future\"\nsummary = \"x\"\nnew_thing = 1\n"}
     ]
   end
 

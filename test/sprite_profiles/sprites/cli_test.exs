@@ -87,4 +87,54 @@ defmodule SpriteProfiles.Sprites.CliTest do
     assert :ok = Cli.destroy(cfg, "demo-1")
     assert_received {:ran, "sprite", ["destroy", "--force", "demo-1"], :merge}
   end
+
+  test "a custom connector's body goes on standard input, never in the arguments" do
+    answer =
+      ~s({"connection":{"id":"conn_1","provider":"custom_api","provider_account_name":"echo","provider_info":{"base_api_url":"https://x.io"}}}\n201)
+
+    cfg = cfg(fn _ -> {answer, 0} end)
+    body = %{"name" => "echo", "access_token" => "dummy-token-in-test"}
+
+    assert {:ok, %{id: "conn_1", name: "echo", base_url: "https://x.io"}} =
+             Cli.create_custom_connector(cfg, body)
+
+    assert_received {:ran, "sprite", args, {:stdin, data}}
+    assert Jason.decode!(data) == body
+    refute Enum.any?(args, &(&1 =~ "dummy-token-in-test"))
+
+    assert args == [
+             "api",
+             "/v1/oauth/connections/custom_api",
+             "--",
+             "-sS",
+             "-X",
+             "POST",
+             "-w",
+             "\n%{http_code}",
+             "-H",
+             "Content-Type: application/json",
+             "--data-binary",
+             "@-"
+           ]
+  end
+
+  test "the default runner passes standard input through and ends it" do
+    assert {"hello", 0} = Cli.default_runner("cat", [], {:stdin, "hello"})
+  end
+
+  test "an error answer does not echo the request" do
+    cfg = cfg(fn _ -> {~s({"error":"bad base url"}\n422), 0} end)
+    body = %{"name" => "echo", "access_token" => "dummy-token-in-test"}
+    assert {:error, message} = Cli.create_custom_connector(cfg, body)
+    assert message =~ "422"
+    refute message =~ "dummy-token-in-test"
+  end
+
+  test "test_custom_connector sends the id alone and reads the result" do
+    cfg = cfg(fn _ -> {~s({"result":{"status":"ok","message":"HTTP 200"}}\n200), 0} end)
+    assert {:ok, %{status: "ok", message: "HTTP 200"}} = Cli.test_custom_connector(cfg, "conn_1")
+    assert_received {:ran, "sprite", args, :discard}
+    assert List.last(args) == ~s({"connection_id":"conn_1"})
+    assert "/v1/oauth/connections/custom_api/test" in args
+  end
 end

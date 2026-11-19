@@ -16,9 +16,12 @@ defmodule SpriteProfiles.Plan do
           set: String.t(),
           privileged: boolean(),
           labels: [String.t()],
+          inputs: [
+            %{name: String.t(), value: String.t(), default: boolean(), profile: String.t()}
+          ],
           env: %{optional(String.t()) => %{value: term(), profile: String.t()}},
           policy: [SpriteProfiles.Profile.policy_rule()] | nil,
-          connectors: [%{provider: String.t(), profiles: [String.t()]}],
+          connectors: [map()],
           services: [map()],
           mcp_servers: [map()],
           claude_settings: map(),
@@ -35,6 +38,7 @@ defmodule SpriteProfiles.Plan do
             set: "",
             privileged: false,
             labels: [],
+            inputs: [],
             env: %{},
             policy: nil,
             connectors: [],
@@ -71,6 +75,7 @@ defmodule SpriteProfiles.Plan do
       "",
       section("Apply order", apply_order(plan)),
       if(plan.sources == [], do: [], else: section("Sources", sources(plan))),
+      if(plan.inputs == [], do: [], else: section("Inputs", inputs(plan))),
       section("Labels", plan.labels),
       section("Connectors", connectors(plan)),
       section("Network policy", policy(plan)),
@@ -132,9 +137,19 @@ defmodule SpriteProfiles.Plan do
   defp duration(s) when rem(s, 60) == 0, do: "#{div(s, 60)}m"
   defp duration(s), do: "#{s}s"
 
+  defp inputs(plan) do
+    Enum.map(plan.inputs, fn i ->
+      "#{i.name} = #{inspect(i.value)}#{if i.default, do: " (default)", else: ""}  (#{shown(plan, i.profile)})"
+    end)
+  end
+
   defp connectors(plan) do
-    Enum.map(plan.connectors, fn c ->
-      "#{c.provider}  (#{Enum.map_join(c.profiles, ", ", &shown(plan, &1))}); must admit a Sprite labelled #{Enum.map_join(c.profiles, " or ", &"profile:#{&1}")}"
+    Enum.map(plan.connectors, fn
+      %{provider: "custom_api", name: name} = c when is_binary(name) ->
+        "custom_api #{name}  (#{shown(plan, name)}): #{SpriteProfiles.Merge.custom_description(c)}; must admit a Sprite labelled profile:#{name}"
+
+      c ->
+        "#{c.provider}  (#{Enum.map_join(c.profiles, ", ", &shown(plan, &1))}); must admit a Sprite labelled #{Enum.map_join(c.profiles, " or ", &"profile:#{&1}")}"
     end)
   end
 
@@ -157,6 +172,7 @@ defmodule SpriteProfiles.Plan do
 
   defp env_value({:secret, name}), do: "<secret #{name}, read at launch>"
   defp env_value({:connector, provider}), do: "<#{provider} connector gateway URL>"
+  defp env_value({:input, name}), do: "<input #{name}>"
   defp env_value(v), do: inspect(v)
 
   defp services(plan) do
@@ -169,7 +185,8 @@ defmodule SpriteProfiles.Plan do
   defp mcp(plan) do
     Enum.map(plan.mcp_servers, fn s ->
       where = s.config["url"] || s.config["command"]
-      "#{s.name} (#{s.type}) #{where}  (#{shown(plan, s.profile)})"
+      via = if Map.get(s, :auth_connector), do: ", credential added by the gateway", else: ""
+      "#{s.name} (#{s.type}) #{where}#{via}  (#{shown(plan, s.profile)})"
     end)
   end
 

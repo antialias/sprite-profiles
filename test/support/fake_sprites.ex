@@ -31,6 +31,27 @@ defmodule SpriteProfiles.FakeSprites do
   def list_connectors(cfg), do: call(cfg, :list_connectors, [], {:ok, []})
 
   @impl true
+  def create_custom_connector(cfg, body) do
+    connector = %{
+      id: "conn_custom",
+      provider: "custom_api",
+      name: body["name"],
+      allow_all: false,
+      sprite_labels: get_in(body, ["access_policy", "sprite_labels"]) || [],
+      name_prefix: nil,
+      allowed_endpoints: get_in(body, ["access_policy", "allowed_endpoints"]) || [],
+      blocked_endpoints: [],
+      base_url: body["base_api_url"]
+    }
+
+    call(cfg, :create_custom_connector, [body], {:ok, connector})
+  end
+
+  @impl true
+  def test_custom_connector(cfg, id),
+    do: call(cfg, :test_custom_connector, [id], {:ok, %{status: "ok", message: "HTTP 200"}})
+
+  @impl true
   def create(cfg, name, labels),
     do: call(cfg, :create, [name, labels], {:ok, %{name: name, labels: labels, url: "url"}})
 

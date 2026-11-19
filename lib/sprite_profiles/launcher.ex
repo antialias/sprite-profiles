@@ -52,13 +52,18 @@ defmodule SpriteProfiles.Launcher do
 
   Options: `:dirs` (the profile search path; see `SpriteProfiles.ProfilePath`), `:dir` (one
   folder, instead of `:dirs`), `:caller` (`:person` or `:agent`), `:secrets_dir`,
-  `:name` (checked when given), and those of `SpriteProfiles.Resolver.find/3` (`:pins`
+  `:name` (checked when given), `:inputs` (`%{name => value}`, the values given for the
+  set's inputs), and those of `SpriteProfiles.Resolver.find/3` (`:pins`
   from a lock, `:offline`, `:cache_dir`, `:req_options`).
   """
   def resolve(names, opts \\ []) do
     with :ok <- Merge.check_picks(names),
          {:ok, profiles} <- Resolver.find(names, dirs(opts), opts),
-         {:ok, plan} <- Merge.merge(profiles, caller: Keyword.get(opts, :caller, :person)),
+         {:ok, plan} <-
+           Merge.merge(profiles,
+             caller: Keyword.get(opts, :caller, :person),
+             inputs: Keyword.get(opts, :inputs, %{})
+           ),
          :ok <- check_name(opts[:name]),
          {:ok, secrets} <- read_secrets(plan, Keyword.get(opts, :secrets_dir, @secrets_dir)) do
       {:ok, plan, profiles, secrets}
@@ -92,6 +97,7 @@ defmodule SpriteProfiles.Launcher do
         profiles: Map.new(profiles, &{&1.qualified, &1}),
         secrets: secrets,
         connector_env: %{},
+        phase_env: %{},
         home: nil,
         info: nil,
         labels_via: nil,
@@ -179,18 +185,19 @@ defmodule SpriteProfiles.Launcher do
       case Merge.check_connectors(state.plan, available, %{}, name: state.name) do
         :ok ->
           env =
-            for {key, %{value: {:connector, provider}}} <- state.plan.env, into: %{} do
-              c =
-                Enum.find(
-                  available,
-                  &(&1.provider == provider and Merge.admits?(&1, state.plan.labels, state.name))
-                )
+            for {key, %{value: {:connector, provider}, profile: p}} <- state.plan.env,
+                into: %{} do
+              entry =
+                Enum.find(state.plan.connectors, fn c ->
+                  c.provider == provider and (c.name == nil or c.name == p)
+                end)
 
+              c = Merge.find_connector(entry, available, state.plan.labels, state.name)
               {key, "#{@gateway}/#{provider}/#{c.id}"}
             end
 
-          providers = Enum.map_join(state.plan.connectors, ", ", & &1.provider)
-          {:ok, %{state | connector_env: env}, "admitted: #{providers}"}
+          names = Enum.map_join(state.plan.connectors, ", ", &connector_name/1)
+          {:ok, %{state | connector_env: env}, "admitted: #{names}"}
 
         {:error, refusals} ->
           {:refused, refusals}
@@ -260,7 +267,7 @@ defmodule SpriteProfiles.Launcher do
     header = "# Written by sprite-profiles for the set #{state.plan.set}.\n"
 
     with :ok <- write(state, @env_file, header <> content, 0o600) do
-      {:ok, state,
+      {:ok, %{state | phase_env: env},
        "#{map_size(env)} vars: #{env |> Map.keys() |> Enum.sort() |> Enum.join(", ")}"}
     end
   end
@@ -358,7 +365,8 @@ defmodule SpriteProfiles.Launcher do
       :skip
     else
       Enum.reduce_while(services, {:ok, state, []}, fn s, {:ok, state, done} ->
-        spec = %{s | dir: expand(s.dir, state.home)}
+        # A service gets its phase's env, the same set the env file holds.
+        spec = Map.put(%{s | dir: expand(s.dir, state.home)}, :env, state.phase_env)
 
         case Sprites.put_service(state.sprites, state.name, s.name, spec) do
           :ok -> {:cont, {:ok, state, done ++ [s.name]}}
@@ -459,6 +467,11 @@ defmodule SpriteProfiles.Launcher do
   end
 
   ## apply helpers
+
+  defp connector_name(%{name: name, provider: provider}) when is_binary(name),
+    do: "#{provider} #{name}"
+
+  defp connector_name(%{provider: provider}), do: provider
 
   defp same_labels?(have, want), do: Enum.sort(have || []) == Enum.sort(want)
 
@@ -622,8 +635,9 @@ defmodule SpriteProfiles.Launcher do
       labels_via: state.labels_via,
       url: state.info && state.info.url,
       policy: Plan.policy_json(state.plan),
-      connectors: Enum.map(state.plan.connectors, & &1.provider),
+      connectors: Enum.map(state.plan.connectors, &connector_name/1),
       env_keys: state.plan.env |> Map.keys() |> Enum.sort(),
+      inputs: Map.new(state.plan.inputs, &{&1.name, &1.value}),
       checkpoint: state.checkpoint,
       outcome: outcome,
       error: error,
