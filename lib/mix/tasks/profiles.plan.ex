@@ -10,12 +10,13 @@ defmodule Mix.Tasks.Profiles.Plan do
       mix profiles.plan --profile claude-code --profile anthropic-key --agent
       mix profiles.plan -p preview -p claude-code --dir path/to/profiles
       mix profiles.plan -p claude-code -p antialias/sprite-profiles/profiles/preview@main
+      mix profiles.plan -p claude-code -p @acme/linear@1
       mix profiles.plan --lock sprite-profiles.lock --offline
       mix profiles.plan -p claude-code -p github-mcp -i readonly=false
 
   Options:
 
-    * `--profile`, `-p` - a profile to pick, by name or by address
+    * `--profile`, `-p` - a profile to pick: a local name, an address or `@owner/name`
       (`owner/repo[/path]@ref`); repeat it, in the order to apply them
     * `--lock` - a lock file written by `mix profiles.lock`: the set, with every address
       pinned to a commit. Instead of `--profile`

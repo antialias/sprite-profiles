@@ -24,19 +24,38 @@ defmodule SpriteProfiles.Lock do
   table; it is then `format = 2`, and `format = 1` otherwise, so a lock without inputs still
   reads on an older launcher.
 
-  A locked launch uses the commit and never resolves the ref. Locking again resolves every
-  ref afresh; `diff/2` says which commits moved. A lock that cannot be read, misses a field
-  or has a newer `format` is refused (`bad_lock`).
+  A name pick (`@owner/name[@V]`) is pinned with where its name was found, and its version
+  (none for a ref pick); a lock holding one is `format = 3`:
+
+  ```toml
+  [[picks]]
+  pick    = "@acme/linear@1"
+  version = "1.2.0"
+  host    = "github.com"
+  owner   = "acme"
+  repo    = "sprite-profiles"
+  path    = "linear"
+  ref     = "linear/v1.2.0"
+  sha     = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
+  name    = "linear"
+  ```
+
+  A locked launch uses the commit and never resolves the ref, the name or the version.
+  Locking again resolves every pick afresh; `diff/2` says which commits and versions
+  moved. A lock that cannot be read, misses a field or has a newer `format` is refused
+  (`bad_lock`). Format-1 and format-2 locks still read.
   """
 
-  alias SpriteProfiles.{Address, Profile, Refusal}
+  alias SpriteProfiles.{Address, Pick, Profile, Refusal}
 
-  @format 2
+  @format 3
   @input_name_re ~r/^[a-z][a-z0-9_]{0,30}$/
   @default_path "sprite-profiles.lock"
 
   @type entry :: %{
           required(:pick) => String.t(),
+          optional(:version) => String.t() | nil,
+          optional(:host) => String.t(),
           optional(:owner) => String.t(),
           optional(:repo) => String.t(),
           optional(:path) => String.t(),
@@ -44,6 +63,8 @@ defmodule SpriteProfiles.Lock do
           optional(:sha) => String.t(),
           optional(:name) => String.t()
         }
+
+  @keys [:pick, :version, :host, :owner, :repo, :path, :ref, :sha, :name]
 
   @doc "Where `mix profiles.lock` writes unless told otherwise."
   def default_path, do: @default_path
@@ -54,6 +75,19 @@ defmodule SpriteProfiles.Lock do
     Enum.map(profiles, fn
       %Profile{source: nil, pick: pick} ->
         %{pick: pick}
+
+      %Profile{source: src, pick: "@" <> _ = pick, name: name} ->
+        %{
+          pick: pick,
+          version: src[:version],
+          host: src[:host] || Pick.github(),
+          owner: src.owner,
+          repo: src.repo,
+          path: src.path,
+          ref: src.ref,
+          sha: src.sha,
+          name: name
+        }
 
       %Profile{source: src, pick: pick, name: name} ->
         %{
@@ -71,9 +105,16 @@ defmodule SpriteProfiles.Lock do
   @doc "The lock file's text for `entries` and the given `inputs` (`%{name => value}`)."
   @spec encode([entry()], DateTime.t(), %{optional(String.t()) => String.t()}) :: String.t()
   def encode(entries, at \\ DateTime.utc_now(), inputs \\ %{}) do
+    format =
+      cond do
+        Enum.any?(entries, &(Pick.kind(&1.pick) == :name)) -> 3
+        inputs != %{} -> 2
+        true -> 1
+      end
+
     head = """
-    # A set with every address pinned to a commit. Written by `mix profiles.lock`.
-    format    = #{if inputs == %{}, do: 1, else: 2}
+    # A set with every address and name pinned to a commit. Written by `mix profiles.lock`.
+    format    = #{format}
     locked_at = #{q(at |> DateTime.truncate(:second) |> DateTime.to_iso8601())}
     """
 
@@ -88,11 +129,14 @@ defmodule SpriteProfiles.Lock do
 
     body =
       Enum.map_join(entries, "", fn e ->
-        keys = [:pick, :owner, :repo, :path, :ref, :sha, :name]
+        keys = for k <- @keys, e[k] != nil, do: k
+
+        width =
+          keys |> Enum.map(&String.length(Atom.to_string(&1))) |> Enum.max(fn -> 5 end) |> max(5)
 
         lines =
-          for k <- keys, Map.has_key?(e, k) do
-            "#{String.pad_trailing(Atom.to_string(k), 5)} = #{q(e[k])}\n"
+          for k <- keys do
+            "#{String.pad_trailing(Atom.to_string(k), width)} = #{q(e[k])}\n"
           end
 
         "\n[[picks]]\n" <> Enum.join(lines)
@@ -188,7 +232,7 @@ defmodule SpriteProfiles.Lock do
         picks
         |> Enum.with_index(1)
         |> Enum.reduce_while({:ok, []}, fn {entry, i}, {:ok, acc} ->
-          case entry(entry) do
+          case entry(entry, f) do
             {:ok, e} -> {:cont, {:ok, acc ++ [e]}}
             {:error, why} -> {:halt, bad(path, "has a bad pick ##{i}: #{why}")}
           end
@@ -200,40 +244,105 @@ defmodule SpriteProfiles.Lock do
   end
 
   @address_fields ~w(owner repo path ref sha name)
+  @name_fields ~w(host owner repo path ref sha name)
 
-  defp entry(%{"pick" => pick} = e) when is_binary(pick) do
-    cond do
-      not Address.address?(pick) ->
+  defp entry(%{"pick" => pick} = e, format) when is_binary(pick) do
+    case Pick.kind(pick) do
+      :local ->
         if Profile.valid_name?(pick) and map_size(e) == 1,
           do: {:ok, %{pick: pick}},
           else: {:error, "#{inspect(pick)} is a local pick, which holds only `pick`"}
 
-      not Enum.all?(@address_fields, &is_binary(e[&1])) ->
-        {:error, "#{pick} needs #{Enum.join(@address_fields, ", ")}"}
+      :address ->
+        address_entry(pick, e)
+
+      :name ->
+        name_entry(pick, e, format)
+    end
+  end
+
+  defp entry(_, _), do: {:error, "it has no `pick` string"}
+
+  defp address_entry(pick, e) do
+    if Enum.all?(@address_fields, &is_binary(e[&1])) do
+      with {:ok, a} <- Address.parse(pick),
+           true <- e["host"] in [nil, Pick.github()],
+           true <-
+             {a.owner, a.repo, a.path, a.ref} == {e["owner"], e["repo"], e["path"], e["ref"]},
+           true <- sha?(e["sha"]),
+           true <- Profile.valid_name?(e["name"]) do
+        {:ok,
+         %{
+           pick: pick,
+           owner: a.owner,
+           repo: a.repo,
+           path: a.path,
+           ref: a.ref,
+           sha: e["sha"],
+           name: e["name"]
+         }}
+      else
+        _ -> {:error, "#{pick} does not agree with its owner, repo, path, ref, sha or name"}
+      end
+    else
+      {:error, "#{pick} needs #{Enum.join(@address_fields, ", ")}"}
+    end
+  end
+
+  defp name_entry(pick, e, format) do
+    cond do
+      format < 3 ->
+        {:error, "#{pick} is a name, which a lock holds from format 3, but it says #{format}"}
+
+      not Enum.all?(@name_fields, &is_binary(e[&1])) ->
+        {:error, "#{pick} needs #{Enum.join(@name_fields, ", ")}"}
 
       true ->
-        with {:ok, a} <- Address.parse(pick),
-             true <-
-               {a.owner, a.repo, a.path, a.ref} == {e["owner"], e["repo"], e["path"], e["ref"]},
-             true <- Regex.match?(~r/^[0-9a-f]{40}$/, e["sha"]),
-             true <- Profile.valid_name?(e["name"]) do
+        with {:ok, p} <- Pick.parse(pick),
+             true <- e["host"] == p.host and Pick.supported?(p),
+             true <- {e["owner"], e["name"]} == {Pick.ns(p), p.name},
+             true <- where_ok?(e["repo"], e["path"]),
+             true <- sha?(e["sha"]),
+             true <- version_ok?(p, e["version"], e["ref"]) do
           {:ok,
            %{
              pick: pick,
-             owner: a.owner,
-             repo: a.repo,
-             path: a.path,
-             ref: a.ref,
+             version: e["version"],
+             host: p.host,
+             owner: e["owner"],
+             repo: e["repo"],
+             path: e["path"],
+             ref: e["ref"],
              sha: e["sha"],
              name: e["name"]
            }}
         else
-          _ -> {:error, "#{pick} does not agree with its owner, repo, path, ref, sha or name"}
+          _ ->
+            {:error,
+             "#{pick} does not agree with its version, host, owner, repo, path, ref, sha or name"}
         end
     end
   end
 
-  defp entry(_), do: {:error, "it has no `pick` string"}
+  defp sha?(s), do: Regex.match?(~r/^[0-9a-f]{40}$/, s)
+
+  defp where_ok?(repo, path) do
+    segments = if path == "", do: [repo], else: [repo | String.split(path, "/")]
+    Enum.all?(segments, &(&1 not in ["", ".", ".."] and &1 =~ ~r/^[A-Za-z0-9._-]+$/))
+  end
+
+  # A ref pick holds no version and the ref as picked; a version pick holds the version
+  # its tag names, matching the pick's prefix.
+  defp version_ok?(%Pick{version: {:ref, ref}}, nil, ref), do: true
+  defp version_ok?(%Pick{version: {:ref, _}}, _, _), do: false
+
+  defp version_ok?(%Pick{} = p, version, ref) when is_binary(version) do
+    Pick.semver(version) != :error and
+      (ref == "v" <> version or String.ends_with?(ref, "/v" <> version)) and
+      (p.version == nil or Pick.matches?(p, version))
+  end
+
+  defp version_ok?(_, _, _), do: false
 
   defp bad(path, why),
     do:
@@ -249,31 +358,50 @@ defmodule SpriteProfiles.Lock do
   @doc "The picks of a lock, in order."
   def picks(entries), do: Enum.map(entries, & &1.pick)
 
-  @doc "The pins of a lock, for `SpriteProfiles.Resolver.find/3`'s `:pins`."
+  @doc """
+  The pins of a lock, for `SpriteProfiles.Resolver.find/3`'s `:pins`: the commit and name
+  of each address, and for a name pick also where it was found and its version.
+  """
   def pins(entries) do
-    for %{sha: sha, name: name, pick: pick} <- entries,
-        into: %{},
-        do: {pick, %{sha: sha, name: name}}
+    for %{sha: sha, name: name, pick: pick} = e <- entries, into: %{} do
+      if Pick.kind(pick) == :name,
+        do: {pick, Map.take(e, [:sha, :name, :owner, :repo, :path, :ref, :version])},
+        else: {pick, %{sha: sha, name: name}}
+    end
   end
 
   @doc """
-  What changed between an old lock and new entries: one line per address whose commit
-  moved, as `pick: old → new (tag moved)`. `kinds` maps a pick to how its ref resolved
-  (`:tag`, `:branch`, `:commit`).
+  What changed between an old lock and new entries: one line per pick whose version or
+  commit moved, as `@acme/linear@1: 1.0.0 → 1.1.0 (new version)` or
+  `pick: old → new (tag moved)`. `kinds` maps a pick to how its ref resolved (`:tag`,
+  `:branch`, `:commit`).
   """
   @spec diff([entry()], [entry()], %{optional(String.t()) => atom()}) :: [String.t()]
   def diff(old, new, kinds \\ %{}) do
-    before = for %{sha: sha, pick: p} <- old, into: %{}, do: {p, sha}
+    before = Map.new(old, &{&1.pick, &1})
 
-    for %{sha: sha, pick: p} <- new, was = before[p], was != sha do
-      what =
-        case kinds[p] do
-          :tag -> " (tag moved)"
-          :branch -> " (branch moved)"
-          _ -> ""
-        end
+    for %{sha: _, pick: p} = e <- new,
+        was = before[p],
+        is_map(was) and is_binary(was[:sha]),
+        line = change(p, was, e, kinds[p]),
+        line != nil,
+        do: line
+  end
 
-      "#{p}: #{String.slice(was, 0, 8)} → #{String.slice(sha, 0, 8)}#{what}"
-    end
+  defp change(p, %{version: v1}, %{version: v2}, _kind)
+       when is_binary(v1) and is_binary(v2) and v1 != v2,
+       do: "#{p}: #{v1} → #{v2} (new version)"
+
+  defp change(_p, %{sha: sha}, %{sha: sha}, _kind), do: nil
+
+  defp change(p, %{sha: was}, %{sha: sha}, kind) do
+    what =
+      case kind do
+        :tag -> " (tag moved)"
+        :branch -> " (branch moved)"
+        _ -> ""
+      end
+
+    "#{p}: #{String.slice(was, 0, 8)} → #{String.slice(sha, 0, 8)}#{what}"
   end
 end

@@ -9,6 +9,8 @@ defmodule SpriteProfiles.Plan do
   plan names them. `sources` says where each fetched profile came from.
   """
 
+  alias SpriteProfiles.Pick
+
   @type t :: %__MODULE__{
           profiles: [String.t()],
           picks: %{optional(String.t()) => String.t()},
@@ -92,21 +94,32 @@ defmodule SpriteProfiles.Plan do
 
   @doc """
   The Sources lines: for each fetched profile, its publisher, repository, ref and commit,
-  and whether it runs a setup.sh. Empty for a set of local profiles.
+  and whether it runs a setup.sh. Empty for a set of local profiles. A name pick also says
+  which folder its name was found in, and shows its version as `@owner/name@1.0.0 = sha`.
   """
   @spec sources(t()) :: [String.t()]
   def sources(%__MODULE__{sources: sources}) do
     width = sources |> Enum.map(&String.length(&1.pick)) |> Enum.max(fn -> 0 end)
 
     Enum.map(sources, fn s ->
-      sha = String.slice(s.sha, 0, 8)
-      ref = if s.ref =~ ~r/^[0-9a-fA-F]{40}$/, do: "commit #{sha}", else: "#{s.ref} = #{sha}"
-
       setup =
         if s[:setup], do: ", setup.sh (up to #{duration(s.timeout)})", else: ", no setup.sh"
 
-      "#{String.pad_trailing(s.pick, width)}  publisher #{s.owner}, repo #{s.owner}/#{s.repo}, #{ref}#{setup}"
+      "#{String.pad_trailing(s.pick, width)}  publisher #{s.owner}, repo #{s.owner}/#{s.repo}#{where(s)}#{setup}"
     end)
+  end
+
+  defp where(s) do
+    sha = String.slice(s.sha, 0, 8)
+
+    case Pick.parse(s.pick) do
+      {:ok, p} ->
+        folder = if s.path == "", do: "", else: ", folder #{s.path}"
+        "#{folder}, #{Pick.base(p)}@#{s[:version] || s.ref} = #{sha}"
+
+      {:error, _} ->
+        if s.ref =~ ~r/^[0-9a-fA-F]{40}$/, do: ", commit #{sha}", else: ", #{s.ref} = #{sha}"
+    end
   end
 
   defp shown(plan, q), do: Map.get(plan.picks, q, q)

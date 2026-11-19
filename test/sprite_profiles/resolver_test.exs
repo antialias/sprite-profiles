@@ -25,12 +25,14 @@ defmodule SpriteProfiles.ResolverTest do
     assert p.pick == "acme/profiles/linear@v2"
 
     assert p.source == %{
+             host: "github.com",
              owner: "acme",
              repo: "profiles",
              path: "linear",
              ref: "v2",
              sha: sha2(),
-             kind: :tag
+             kind: :tag,
+             version: nil
            }
 
     assert p.setup =~ Path.join(["github", "acme", "profiles", sha2(), "linear", "setup.sh"])

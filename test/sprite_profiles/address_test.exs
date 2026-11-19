@@ -56,10 +56,4 @@ defmodule SpriteProfiles.AddressTest do
     assert Address.identity(root) == "acme/linear-profile"
     assert Address.expected_name(root) == nil
   end
-
-  test "address?/1 tells an address from a name" do
-    assert Address.address?("acme/linear@v1")
-    assert Address.address?("acme@v1")
-    refute Address.address?("claude-code")
-  end
 end

@@ -63,6 +63,26 @@ defmodule Mix.Tasks.Profiles.LockTest do
     refute_received {:github, _, _}
   end
 
+  test "lock a name, then plan from the lock offline", %{lock: lock} do
+    stub_names()
+    Lock.run(["-p", "claude-code", "-p", "@acme/linear@1", "-o", lock])
+    out = output()
+    assert out =~ "@acme/linear@1  version 1.1.0, tag linear/v1.1.0 = c3c3c3c3"
+    assert File.read!(lock) =~ "format    = 3"
+    assert File.read!(lock) =~ ~s(version = "1.1.0")
+    flush_github()
+
+    Plan.run(["--lock", lock, "--offline"])
+    out = output()
+    assert out =~ "Plan for claude-code+@acme/linear@1"
+
+    assert out =~
+             "Sources:\n  @acme/linear@1  publisher acme, repo acme/sprite-profiles, folder linear, @acme/linear@1.1.0 = c3c3c3c3"
+
+    assert out =~ "profile:acme.linear"
+    refute_received {:github, _, _}
+  end
+
   test "a locked launch resolves nothing", %{lock: lock} do
     Lock.run(["-p", "acme/profiles/linear@v1", "-o", lock])
     output()

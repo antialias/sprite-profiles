@@ -2,20 +2,24 @@ defmodule Mix.Tasks.Profiles.Lock do
   @shortdoc "Pins a set's addresses to commits in a lock file"
 
   @moduledoc """
-  Resolves every address in a set to a commit, fetches it, checks that the set plans, and
-  writes a lock file: the set, with every address pinned. `mix profiles.plan` and
-  `mix profiles.launch` take it with `--lock FILE`, and then resolve no ref.
+  Resolves every address and name in a set to a commit, fetches it, checks that the set
+  plans, and writes a lock file: the set, with every address and name pinned.
+  `mix profiles.plan` and `mix profiles.launch` take it with `--lock FILE`, and then resolve
+  no ref and no name.
 
       mix profiles.lock -p claude-code -p antialias/sprite-profiles/profiles/preview@main
       mix profiles.lock -p claude-code -p acme/profiles/linear@v1 -o linear.lock
+      mix profiles.lock -p claude-code -p @acme/linear@1
       mix profiles.lock -p claude-code -p github-mcp -i toolsets=repos,issues
 
   Locking again over an existing file resolves every ref afresh and prints each commit that
-  moved (`acme/profiles/linear@v1: 1a2b3c4d → 4d5e6f7a (tag moved)`).
+  moved (`acme/profiles/linear@v1: 1a2b3c4d → 4d5e6f7a (tag moved)`) and each new version
+  (`@acme/linear@1: 1.0.0 → 1.1.0 (new version)`).
 
   Options:
 
-    * `--profile`, `-p` - a profile to pick, by name or by address; repeat it, in order
+    * `--profile`, `-p` - a profile to pick: a local name, an address or `@owner/name`;
+      repeat it, in order
     * `--input`, `-i` - `name=value` for one of the set's inputs; repeat it. The lock
       records the values given (`[inputs]`); an input not given takes its default at use
     * `--output`, `-o` - the lock file to write (default `sprite-profiles.lock`)
@@ -79,6 +83,9 @@ defmodule Mix.Tasks.Profiles.Lock do
       Enum.each(profiles, fn
         %{source: nil, pick: p} ->
           Mix.shell().info("  #{p}  (local)")
+
+        %{source: %{version: v} = s, pick: p} when is_binary(v) ->
+          Mix.shell().info("  #{p}  version #{v}, tag #{s.ref} = #{String.slice(s.sha, 0, 8)}")
 
         %{source: s, pick: p} ->
           Mix.shell().info("  #{p}  #{s.kind} #{s.ref} = #{String.slice(s.sha, 0, 8)}")

@@ -14,13 +14,14 @@ defmodule Mix.Tasks.Profiles.Launch do
 
   Options:
 
-    * `--profile`, `-p` - a profile to pick, by name or by address
-      (`owner/repo[/path]@ref`); repeat it, in the order to apply them
+    * `--profile`, `-p` - a profile to pick: a local name, an address
+      (`owner/repo[/path]@ref`) or a published name (`@owner/name[@version]`); repeat it,
+      in the order to apply them
     * `--lock` - a lock file written by `mix profiles.lock`, instead of `--profile`; the
       launch uses its commits and resolves no ref
     * `--input`, `-i` - `name=value` for one of the set's inputs; repeat it. An input not
       given takes its default. Not with `--lock`, which holds its own
-    * `--offline` - fetch nothing: every address must be pinned and cached
+    * `--offline` - fetch nothing: every address and name must be pinned and cached
     * `--name` - the Sprite's name (default: the picks joined by '-', then 4 hex digits)
     * `--dry-run` - resolve the set and print the plan; create nothing
     * `--destroy-on-failure` - destroy the Sprite if a step after its creation fails

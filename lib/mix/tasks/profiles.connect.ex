@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Profiles.Connect do
 
       mix profiles.connect -p github-mcp
       mix profiles.connect -p acme/profiles/linear@v1
+      mix profiles.connect -p @acme/linear
 
   It prints what it will create, then reads the token from the terminal with echo off and
   sends it to Fly once. The token is never printed, logged or written anywhere. There is no
@@ -20,7 +21,8 @@ defmodule Mix.Tasks.Profiles.Connect do
 
   Options:
 
-    * `--profile`, `-p` - the profile, by name or by address; exactly one
+    * `--profile`, `-p` - the profile: a local name, an address or `@owner/name`; exactly
+      one
     * `--dir` - a folder holding profiles; repeat it to search several
     * `--adapter` - `cli` (default: the installed, logged-in `sprite` CLI) or `api` (REST
       with `SPRITES_TOKEN`)

@@ -73,7 +73,7 @@ picks in order and, for each address, the owner, repo, path, ref, commit and nam
 `--lock FILE` replaces `--profile` for `plan` and `launch` (giving both is bad usage); a
 locked launch uses the commit and never resolves the ref. Re-running `mix profiles.lock`
 resolves again and reports each commit that changed. A lock that cannot be read, misses a
-field or has a newer `format` is refused (`bad_lock`).
+field or has a newer `format` is refused (`bad_lock`). Every older format still reads.
 
 ```toml
 format    = 1
@@ -103,9 +103,93 @@ readonly = "false"
 
 There is no publisher allowlist: a fetched profile's `setup.sh` runs with the Sprite's full
 access, like any other. What the set fetches is shown instead: the plan's **Sources**
-section, after the apply order and only when the set holds an address, names each address's
-publisher, repository, ref, commit and whether it runs a
+section, after the apply order and only when the set holds an address or a name, names each
+fetched profile's publisher, repository, ref, commit and whether it runs a
 `setup.sh`, and the launch prints it before any API call and keeps it in the launch record.
+A name's line also names the folder it was found in and shows its version:
+
+```
+@acme/linear@1  publisher acme, repo acme/sprite-profiles, folder linear, @acme/linear@1.1.0 = c3c3c3c3, no setup.sh
+```
+
+### Profiles by name
+
+A pick starting with `@` is a **name**: `@owner/name[@version]`, a published profile found
+by convention, the way `gh` finds extensions. Nothing is hosted: a published profile is a
+public GitHub repository laid out as below, and its versions are git tags.
+
+| pick | kind |
+|---|---|
+| `claude-code` | local, on the search path |
+| `@acme/linear`, `@acme/linear@1`, `@acme/linear@1.2`, `@acme/linear@1.2.3`, `@acme/linear@main` | a name |
+| `acme/profiles/linear@v1` | an address |
+
+A leading `@` makes a name; otherwise a `/` or an `@` makes an address; otherwise the pick
+is local. In a name, `owner` is a GitHub owner (compared case-insensitively) and `name` a
+profile name. A first segment holding a `.` or a `:` is a host, `@HOST/NS/NAME[@V]`:
+`github.com` is the same as no host, and any other host is refused for now
+(`host_not_supported`). A malformed name is `bad_name`.
+
+**Where a name is found.** For `@owner/name`, the first of these that exists wins; one
+owner controls all of them, so the order is never a guess:
+
+1. **Its own repository**, `owner/sprite-profile-<name>`, with `profile.toml` at the root.
+   Versions are tags `vX.Y.Z`.
+2. **The owner's collection**, `owner/sprite-profiles`, with the profile in the folder
+   `<name>/` or `profiles/<name>/`. Versions are tags `<folder>/vX.Y.Z`; when the folder has
+   none, the collection's own `vX.Y.Z` tags. A folder is the collection's when it holds a
+   `profile.toml` at the default branch, or has version tags. Both folders at once is
+   refused (`name_ambiguous`).
+3. **A pointer** in `links.toml` at the collection's root, read at its default branch:
+
+   ```toml
+   linear = "platform/tools/sprite/linear"   # REPO/path, same owner; the last segment is the name
+   ```
+
+   Versions are tags `<path>/vX.Y.Z` in that repository only, never its plain `v` tags,
+   which version the repository's own releases. An entry that is not `REPO/path` ending in
+   the name, or a `links.toml` that is not TOML, is refused (`bad_links`).
+
+Nothing matching is refused (`name_not_found`), naming the places looked in. Finding a name
+reads refs (from `info/refs`, as for an address) and single files (from
+`raw.githubusercontent.com`), never GitHub's API and never an archive; then the commit is
+fetched and read exactly like the address it stands for, and the profile must declare the
+name it was picked by (`name_mismatch`).
+
+**Versions.** After the `@`:
+
+- `1`, `1.2` or `1.2.3` is a prefix: the newest version that matches, compared as numbers
+  (`1.10.0` is newer than `1.9.0`). Pre-releases (`v2.0.0-rc1`) are ignored. No match is
+  refused (`version_not_found`), naming the versions there are.
+- Anything else is a ref, as in an address: a branch, a tag or a 40-hex commit, for
+  development. A ref pick has no version.
+- No `@` is the newest version. A profile with no version tags must be picked by a ref
+  (`no_versions`, which suggests `@main`).
+
+**Identity.** A name and the address of the same profile are the same profile: the
+qualified name is `<owner>.<name>` either way, so labels, connector names and skills
+folders are the same, and one set holding both is a `profile_collision`. Two picks of one
+name at different versions are a `duplicate_pick`.
+
+**Locks.** A name is locked with where it was found and what it resolved to, so a locked
+launch resolves no name and reads no tags and no `links.toml`. A lock holding a name is
+`format = 3`; one without is written as before, so it still reads on an older launcher.
+
+```toml
+[[picks]]
+pick    = "@acme/linear@1"
+version = "1.1.0"                  # absent for a ref pick (@acme/linear@main)
+host    = "github.com"
+owner   = "acme"
+repo    = "sprite-profiles"
+path    = "linear"
+ref     = "linear/v1.1.0"
+sha     = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+name    = "linear"
+```
+
+The version must match the pick and the tag in `ref`. Locking again reports a new version
+as `@acme/linear@1: 1.0.0 → 1.1.0 (new version)`.
 
 ### profile.toml
 
@@ -242,7 +326,7 @@ An MCP server takes the fields Claude Code's own configuration takes (`type`, `u
 
 ## Merging a set
 
-A **set** is an ordered list of picks, each a profile name or an address. Merging a set gives either a **plan** (what
+A **set** is an ordered list of picks, each a profile name, an address or a published name. Merging a set gives either a **plan** (what
 the Sprite will get and in what order) or one or more **refusals**. The rule throughout:
 union where that is safe, refusal where two profiles disagree. Nothing is picked silently.
 
@@ -261,7 +345,8 @@ union where that is safe, refusal where two profiles disagree. Nothing is picked
 | `setup.sh` | runs in apply order, each with its own `timeout`, with `PROFILED_PROFILE`, `PROFILED_SET` and the merged env exported; a failure stops the launch | |
 | `privileged` | a set holding a privileged profile is privileged: a person may launch it, an agent may not | `not_for_agents` |
 | order | pick order, except that privileged profiles (and any with `checkpoint = false`) are applied after the `profiled` checkpoint, so credentials are never in a checkpoint. The plan prints the final order | |
-| bounds | 1 to 8 picks, none repeated (an address repeated at another ref counts), every pick a valid name or address; no two with one qualified name | `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `bad_address`, `address_needs_ref`, `profile_collision` |
+| bounds | 1 to 8 picks, none repeated (an address repeated at another ref, or a name at another version, counts), every pick a valid name, address or published name; no two with one qualified name | `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `bad_address`, `address_needs_ref`, `host_not_supported`, `profile_collision` |
+| names | each published name is found by convention and its version chosen before merging (see Profiles by name) | `name_not_found`, `name_ambiguous`, `bad_links`, `no_versions`, `version_not_found` |
 
 A pick that names no folder on the search path is refused with `profile_not_found`, one found
 in two folders with `profile_ambiguous`; a profile that fails
@@ -275,7 +360,8 @@ profile involved and says what to change:
 > profiles 'github' and 'claude-code' both define env GITHUB_TOKEN; a set will not pick one
 > silently, so remove it from one of them.
 
-A refusal names a fetched profile by its pick as written, `acme/profiles/linear@v1`.
+A refusal names a fetched profile by its pick as written, `acme/profiles/linear@v1` or
+`@acme/linear@1`.
 
 ### Validation codes
 
@@ -309,10 +395,10 @@ A refusal names a fetched profile by its pick as written, `acme/profiles/linear@
 `mix profiles.launch` (`SpriteProfiles.Launcher`) turns a plan into a Sprite. A launcher in
 another language should do the same, in this order:
 
-1. **Resolve locally.** Read the lock or resolve each address, fetch what the cache lacks,
-   then merge the set and refuse before any Sprites API call. The plan's Sources section is
-   printed first. Two more refusals exist here: `secret_missing` (a privileged profile's
-   secret is not on the launching machine) and `bad_sprite_name`.
+1. **Resolve locally.** Read the lock or resolve each address and name, fetch what the
+   cache lacks, then merge the set and refuse before any Sprites API call. The plan's
+   Sources section is printed first. Two more refusals exist here: `secret_missing` (a
+   privileged profile's secret is not on the launching machine) and `bad_sprite_name`.
 2. **Check connectors**, only when the set declares one: list the org's connectors and
    apply the rules in the merge table (access policy; for a custom API connector also its
    name, endpoints and base URL). A refusal here creates nothing.
@@ -340,7 +426,7 @@ another language should do the same, in this order:
    a checkpoint.
 8. **Record** the launch: the steps with their times, the labels and how they were set, the
    policy, the env keys (never values), the inputs (name and value), the sources (pick,
-   owner, repo, path, ref, commit)
+   host, owner, repo, path, ref, commit, version)
    and the checkpoint id, as JSON under
    `~/.local/state/sprite-profiles/launches/`.
 

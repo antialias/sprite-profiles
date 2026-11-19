@@ -271,11 +271,13 @@ defmodule SpriteProfiles.LauncherTest do
       assert record.sources == [
                %{
                  pick: "acme/profiles/linear@v1",
+                 host: "github.com",
                  owner: "acme",
                  repo: "profiles",
                  path: "linear",
                  ref: "v1",
-                 sha: SpriteProfiles.GitHubFixtures.sha1()
+                 sha: SpriteProfiles.GitHubFixtures.sha1(),
+                 version: nil
                }
              ]
 

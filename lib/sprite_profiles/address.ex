@@ -9,6 +9,8 @@ defmodule SpriteProfiles.Address do
 
   A first segment holding a `.` is refused: it is reserved for a host prefix later
   (`gitlab.example/...`), and a GitHub owner cannot contain one.
+
+  `SpriteProfiles.Pick.kind/1` says whether a pick is an address at all.
   """
 
   @enforce_keys [:owner, :repo, :path, :ref]
@@ -21,10 +23,6 @@ defmodule SpriteProfiles.Address do
   @segment_re ~r/^[A-Za-z0-9._-]+$/
   @ref_re ~r/^[A-Za-z0-9._\/-]+$/
   @sha_re ~r/^[0-9a-fA-F]{40}$/
-
-  @doc "True when `pick` is written as an address (it holds a `/` or an `@`), not a name."
-  def address?(pick) when is_binary(pick), do: String.contains?(pick, ["/", "@"])
-  def address?(_), do: false
 
   @doc """
   Parses an address. Returns `{:ok, address}`, or `{:error, :address_needs_ref}` when

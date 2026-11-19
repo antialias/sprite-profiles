@@ -9,22 +9,26 @@ defmodule SpriteProfiles.GitHub do
     * `fetch/2` downloads `codeload.github.com/<owner>/<repo>/tar.gz/<sha>`, checks every
       entry, and extracts it into the cache, where it stays: a commit never changes, so an
       entry is never invalidated.
+    * `refs/3` and `read_file/5` serve name resolution (`SpriteProfiles.Names`): every
+      ref of a repository, from the same `info/refs`, and one file at a commit from
+      `raw.githubusercontent.com`.
 
   The cache is `<root>/github/<owner>/<repo>/<sha>/`, holding the whole repository at that
   commit. The root is `SPRITE_PROFILES_CACHE`, else `$XDG_CACHE_HOME/sprite-profiles`, else
   `~/.cache/sprite-profiles`. A partial download never lands there.
 
-  Options for both: `:pick` (the pick as written, for sentences), `:offline` (refuse
+  Options for all: `:pick` (the pick as written, for sentences), `:offline` (refuse
   anything that would call out, `not_cached`), `:cache_dir` (the root), `:req_options`
-  (merged into the `Req` request; tests pass a `Req.Test` plug), `:github_url` and
-  `:codeload_url`. The application env `config :sprite_profiles, SpriteProfiles.GitHub,
-  req_options: [...]` is merged first.
+  (merged into the `Req` request; tests pass a `Req.Test` plug), `:github_url`,
+  `:codeload_url` and `:raw_url`. The application env
+  `config :sprite_profiles, SpriteProfiles.GitHub, req_options: [...]` is merged first.
   """
 
   alias SpriteProfiles.{Address, Refusal}
 
   @github_url "https://github.com"
   @codeload_url "https://codeload.github.com"
+  @raw_url "https://raw.githubusercontent.com"
   @max_archive 32 * 1024 * 1024
 
   @doc "The largest archive accepted, in bytes (compressed)."
@@ -78,27 +82,64 @@ defmodule SpriteProfiles.GitHub do
          )}
 
       true ->
-        url =
-          "#{opts[:github_url] || @github_url}/#{Address.repo_slug(address)}.git/info/refs?service=git-upload-pack"
-
-        case get(url, opts) do
-          {:ok, %{status: 200, body: body}} ->
-            body |> parse_refs() |> pick_ref(ref, address, opts)
-
-          {:ok, %{status: status}} when status in [401, 404] ->
-            {:error,
-             refusal(
-               :repo_not_found,
-               address,
-               opts,
-               "names the repository #{Address.repo_slug(address)}, which GitHub does not show (#{status}); check the owner and name. Only public repositories can be fetched, and a private one looks the same."
-             )}
-
-          other ->
-            {:error, fetch_failed(address, url, other, opts)}
+        case refs(address.owner, address.repo, opts) do
+          {:ok, refs} -> find_ref(refs, ref, address, opts)
+          {:error, :not_found, status} -> {:error, repo_not_found(address, status, opts)}
+          {:error, %Refusal{} = r} -> {:error, r}
         end
     end
   end
+
+  @doc """
+  Reads the refs of `owner/repo` with one request to `info/refs` (see the moduledoc):
+  `{:ok, %{ref_name => sha}}` (with `"HEAD"`, the default branch's commit),
+  `{:error, :not_found, status}` when GitHub does not show the repository (401 or 404),
+  or `{:error, refusal}` (`fetch_failed`).
+  """
+  @spec refs(String.t(), String.t(), keyword()) ::
+          {:ok, %{optional(String.t()) => String.t()}}
+          | {:error, :not_found, integer()}
+          | {:error, Refusal.t()}
+  def refs(owner, repo, opts \\ []) do
+    url =
+      "#{opts[:github_url] || @github_url}/#{owner}/#{repo}.git/info/refs?service=git-upload-pack"
+
+    case get(url, opts) do
+      {:ok, %{status: 200, body: body}} -> {:ok, parse_refs(body)}
+      {:ok, %{status: status}} when status in [401, 404] -> {:error, :not_found, status}
+      other -> {:error, fetch_failed(repo_address(owner, repo), url, other, opts)}
+    end
+  end
+
+  @doc """
+  Reads one file of `owner/repo` at commit `sha` from `raw.githubusercontent.com`:
+  `{:ok, text}`, `:missing` (404), or `{:error, refusal}` (`fetch_failed`). Used for what
+  a name needs before its version is known (`links.toml`, whether a folder holds a
+  profile), so no archive is fetched to find a name.
+  """
+  @spec read_file(String.t(), String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, binary()} | :missing | {:error, Refusal.t()}
+  def read_file(owner, repo, sha, path, opts \\ []) do
+    url = "#{opts[:raw_url] || @raw_url}/#{owner}/#{repo}/#{sha}/#{path}"
+
+    case get(url, opts) do
+      {:ok, %{status: 200, body: body}} -> {:ok, body}
+      {:ok, %{status: 404}} -> :missing
+      other -> {:error, fetch_failed(repo_address(owner, repo), url, other, opts)}
+    end
+  end
+
+  @doc "The refusal for a repository GitHub does not show."
+  def repo_not_found(%Address{} = address, status, opts) do
+    refusal(
+      :repo_not_found,
+      address,
+      opts,
+      "names the repository #{Address.repo_slug(address)}, which GitHub does not show (#{status}); check the owner and name. Only public repositories can be fetched, and a private one looks the same."
+    )
+  end
+
+  defp repo_address(owner, repo), do: %Address{owner: owner, repo: repo, path: "", ref: ""}
 
   @doc """
   Parses a smart-HTTP ref advertisement (pkt-lines) into `%{ref_name => sha}`. The service
@@ -125,6 +166,16 @@ defmodule SpriteProfiles.GitHub do
   end
 
   defp parse_pkts(_, acc), do: acc
+
+  @doc """
+  Finds `ref` in parsed `refs` (`refs/1`) as `resolve/2` does: `{:ok, sha, kind}` or
+  `{:error, refusal}` (`ref_not_found`, `ref_ambiguous`). A 40-hex ref is taken as is.
+  """
+  def find_ref(refs, ref, %Address{} = address, opts) do
+    if Address.sha?(ref),
+      do: {:ok, String.downcase(ref), :commit},
+      else: pick_ref(refs, ref, address, opts)
+  end
 
   defp pick_ref(refs, ref, address, opts) do
     peeled = refs["refs/tags/#{ref}^{}"]

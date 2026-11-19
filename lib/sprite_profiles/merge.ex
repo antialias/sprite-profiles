@@ -7,7 +7,7 @@ defmodule SpriteProfiles.Merge do
   refusal found is returned, not only the first, so a person can fix them in one pass.
   """
 
-  alias SpriteProfiles.{Address, ClaudeSettings, Plan, Profile, Refusal}
+  alias SpriteProfiles.{Address, ClaudeSettings, Pick, Plan, Profile, Refusal}
 
   @max_picks 8
 
@@ -22,8 +22,9 @@ defmodule SpriteProfiles.Merge do
 
   @doc """
   Checks the picks alone (count, repeats, spelling), before any profile is read. A pick is a
-  profile name or an address (`owner/repo[/path]@ref`). The same address at two refs is a
-  repeat.
+  profile name, an address (`owner/repo[/path]@ref`) or a name pick (`@owner/name[@V]`); see
+  `SpriteProfiles.Pick`. The same address at two refs, or the same name at two versions, is
+  a repeat.
   """
   @spec check_picks([String.t()]) :: :ok | {:error, [Refusal.t()]}
   def check_picks([]) do
@@ -54,7 +55,7 @@ defmodule SpriteProfiles.Merge do
             Refusal.new(
               :duplicate_pick,
               several,
-              "#{Enum.map_join(several, " and ", &"'#{&1}'")} are one profile (#{id}) picked at different refs; pick it once."
+              "#{Enum.map_join(several, " and ", &"'#{&1}'")} are one profile (#{id}) picked at different refs or versions; pick it once."
             )
         end
       end)
@@ -79,52 +80,87 @@ defmodule SpriteProfiles.Merge do
   end
 
   defp pick_problem(pick) do
-    cond do
-      Address.address?(pick) ->
-        case Address.parse(pick) do
-          {:ok, _} ->
-            []
+    case Pick.kind(pick) do
+      :address -> address_problem(pick)
+      :name -> name_problem(pick)
+      :local -> local_problem(pick)
+    end
+  end
 
-          {:error, :address_needs_ref} ->
-            [
-              Refusal.new(
-                :address_needs_ref,
-                [pick],
-                "#{inspect(pick)} has no ref; add a tag, a branch or a commit, like #{pick}@v1 or #{pick}@main."
-              )
-            ]
-
-          {:error, :bad_address} ->
-            [
-              Refusal.new(
-                :bad_address,
-                [],
-                "#{inspect(pick)} is not an address; an address is owner/repo[/path]@ref, as GitHub Actions writes it."
-              )
-            ]
-        end
-
-      Profile.valid_name?(pick) ->
+  defp address_problem(pick) do
+    case Address.parse(pick) do
+      {:ok, _} ->
         []
 
-      true ->
+      {:error, :address_needs_ref} ->
         [
           Refusal.new(
-            :bad_name,
+            :address_needs_ref,
+            [pick],
+            "#{inspect(pick)} has no ref; add a tag, a branch or a commit, like #{pick}@v1 or #{pick}@main."
+          )
+        ]
+
+      {:error, :bad_address} ->
+        [
+          Refusal.new(
+            :bad_address,
             [],
-            "#{inspect(pick)} is not a profile name; names are 2-31 characters of a-z, 0-9 and '-', starting with a letter."
+            "#{inspect(pick)} is not an address; an address is owner/repo[/path]@ref, as GitHub Actions writes it."
           )
         ]
     end
   end
 
-  # Two picks are the same profile when they name it the same way, ignoring the ref.
-  defp pick_identity(pick) do
-    with true <- Address.address?(pick),
-         {:ok, address} <- Address.parse(pick) do
-      Address.identity(address)
+  defp name_problem(pick) do
+    case Pick.parse(pick) do
+      {:ok, p} ->
+        if Pick.supported?(p), do: [], else: [SpriteProfiles.Names.host_not_supported(p, pick)]
+
+      {:error, :bad_name} ->
+        [
+          Refusal.new(
+            :bad_name,
+            [],
+            "#{inspect(pick)} is not a published name; a name is @owner/name, optionally with a version (@owner/name@1) or a ref (@owner/name@main)."
+          )
+        ]
+    end
+  end
+
+  defp local_problem(pick) do
+    if Profile.valid_name?(pick) do
+      []
     else
-      _ -> pick
+      [
+        Refusal.new(
+          :bad_name,
+          [],
+          "#{inspect(pick)} is not a profile name; names are 2-31 characters of a-z, 0-9 and '-', starting with a letter."
+        )
+      ]
+    end
+  end
+
+  # Two picks are the same profile when they name it the same way, ignoring the ref or
+  # version. A name and an address of one profile are told apart only once both are
+  # fetched, by their qualified name (`profile_collision`).
+  defp pick_identity(pick) do
+    case Pick.kind(pick) do
+      :address ->
+        case Address.parse(pick) do
+          {:ok, address} -> Address.identity(address)
+          _ -> pick
+        end
+
+      :name ->
+        case Pick.parse(pick) do
+          {:ok, p} -> Pick.identity(p)
+          _ -> pick
+        end
+
+      :local ->
+        pick
     end
   end
 

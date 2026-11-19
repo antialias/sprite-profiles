@@ -627,7 +627,10 @@ defmodule SpriteProfiles.Launcher do
       set: state.plan.set,
       profiles: state.plan.profiles,
       sources:
-        Enum.map(state.plan.sources, &Map.take(&1, [:pick, :owner, :repo, :path, :ref, :sha])),
+        Enum.map(
+          state.plan.sources,
+          &Map.take(&1, [:pick, :host, :owner, :repo, :path, :ref, :sha, :version])
+        ),
       before_checkpoint: state.plan.before_checkpoint,
       after_checkpoint: state.plan.after_checkpoint,
       privileged: state.plan.privileged,
