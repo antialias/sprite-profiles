@@ -7,6 +7,11 @@ defmodule SpriteProfiles.Application do
 
   @impl true
   def start(_type, _args) do
+    # The `sprite-profiles` binary (config/cli.exs) runs its command here and halts, before
+    # anything web-facing starts and before Elixir's own command-line handling would read
+    # the arguments as a script to run.
+    if Application.get_env(:sprite_profiles, :cli, false), do: SpriteProfiles.CLI.run()
+
     children = [
       SpriteProfilesWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:sprite_profiles, :dns_cluster_query) || :ignore},

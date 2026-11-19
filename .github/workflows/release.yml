@@ -1,0 +1,93 @@
+# Builds the standalone `sprite-profiles` binaries (a Mix release wrapped by Burrito, see
+# `releases/0` in mix.exs) for a pushed v* tag and attaches them to that tag's release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  # Burrito downloads a prebuilt ERTS of exactly this OTP version for each target, so it
+  # must be one Burrito's ERTS builds have. Zig must be the version Burrito pins.
+  OTP_VERSION: "29.1"
+  ELIXIR_VERSION: "1.20.5"
+  ZIG_VERSION: "0.16.0"
+  MIX_ENV: prod
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos_arm64
+            runner: macos-15
+          - target: linux_x86_64
+            runner: ubuntu-24.04
+          - target: linux_arm64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-type: strict
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: xz
+        if: runner.os == 'macOS'
+        run: command -v xz || brew install xz
+
+      - run: mix deps.get --only prod
+
+      - name: Build
+        run: mix release --overwrite
+        env:
+          BURRITO_TARGET: ${{ matrix.target }}
+
+      - name: Name the binary
+        run: |
+          name="sprite-profiles-${{ matrix.target }}"
+          mkdir dist
+          mv "burrito_out/sprite_profiles_${{ matrix.target }}" "dist/$name"
+          (cd dist && shasum -a 256 "$name" > "$name.sha256")
+
+      - name: Check it runs
+        if: matrix.target != 'linux_arm64'
+        run: |
+          cd "$RUNNER_TEMP"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin \
+            "$GITHUB_WORKSPACE/dist/sprite-profiles-${{ matrix.target }}" plan claude-code
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sprite-profiles-${{ matrix.target }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach to the tag's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber

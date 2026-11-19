@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Profiles.Plan do
 
   use Mix.Task
 
-  alias SpriteProfiles.{Merge, Plan, ProfilePath, Resolver, SetArgs}
+  alias SpriteProfiles.{Plan, Planner, ProfilePath, SetArgs}
 
   @switches [
     profile: :keep,
@@ -83,11 +83,8 @@ defmodule Mix.Tasks.Profiles.Plan do
   end
 
   defp plan(picks, opts) do
-    with :ok <- Merge.check_picks(picks),
-         {:ok, profiles} <- Resolver.find(picks, opts[:dirs], opts),
-         {:ok, plan} <- Merge.merge(profiles, caller: opts[:caller], inputs: opts[:inputs] || %{}) do
-      Mix.shell().info(Plan.format(plan))
-    else
+    case Planner.plan(picks, opts) do
+      {:ok, plan} -> Mix.shell().info(Plan.format(plan))
       {:error, problems} -> refused(problems)
     end
   end
