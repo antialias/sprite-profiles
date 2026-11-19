@@ -348,3 +348,39 @@ Inside the Sprite:
 
 The service's side was one bearer token with a narrow scope, and a repository with a
 `profile.toml` and a skill. sprite-profiles holds no code for the shop.
+
+## Profiles by name, from GitHub and a self-hosted git server
+
+Measured 19 Nov 2026. A name finds a published profile by convention, so nothing is
+hosted: `@owner/name` looks for the repository `owner/sprite-profile-name`, then the
+collection `owner/sprite-profiles`; versions are the repository's `vX.Y.Z` tags.
+
+**A self-hosted Gitea.** A private repository `sprite-profile-shop-inventory` holding the
+shop's profile at its root, tagged `v1.0.0`, on a Gitea that refuses its API to anyone not signed in and
+redirects its archive links (303). Plain `git` reached it
+through the git credentials already on the laptop; sprite-profiles asked for none and held
+none. `HOST` below stands for the server's name.
+
+| pick | resolved to |
+|---|---|
+| `@HOST/antialias/shop-inventory` | 1.0.0 (newest version), the tag's commit |
+| `@HOST/antialias/shop-inventory@1` | 1.0.0 |
+| `@HOST/antialias/shop-inventory@main` | the branch's commit (the same one) |
+| `HOST/antialias/sprite-profile-shop-inventory@v1.0.0` | the same commit, by address |
+
+- The label was `profile:HOST.antialias.shop-inventory` and the connector the plan asked
+  for was named the same, so a profile from another host never shares a connector with
+  GitHub's `antialias.shop-inventory`.
+- `mix profiles.lock` with the name took 1.0 s from a cold cache, Mix's start included,
+  and wrote a `format = 3` lock with the version, the host and the commit. A plan from that
+  lock with `--offline` resolved nothing and fetched nothing.
+- A name with no repository behind it was refused as `name_not_found` in 0.6 s; with
+  `GIT_TERMINAL_PROMPT=0`, git never waited at a prompt.
+- Fetching one commit with `git fetch --depth 1 --filter=blob:none` and a sparse checkout of
+  the profile's folder took about 0.7 s, on this server and on GitHub alike.
+
+**The standalone command.** `sprite-profiles` built as a Burrito binary for macOS arm64 is
+10.8 MB. Its first run unpacks the release (48 MB) in about 1.5 s; after that
+`sprite-profiles --version` takes 0.17 s and `plan claude-code` 0.18 s, with no Erlang or
+Elixir on the PATH. Its `plan` output matched `mix profiles.plan` byte for byte on five sets,
+and it fetched a profile from GitHub over HTTPS with the certificates in the release.

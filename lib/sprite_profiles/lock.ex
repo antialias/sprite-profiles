@@ -135,7 +135,7 @@ defmodule SpriteProfiles.Lock do
       end
 
     head = """
-    # A set with every address and name pinned to a commit. Written by `mix profiles.lock`.
+    # A set with every address and name pinned to a commit. Written by `sprite-profiles lock` (or `mix profiles.lock`).
     format    = #{format}
     locked_at = #{q(at |> DateTime.truncate(:second) |> DateTime.to_iso8601())}
     """
