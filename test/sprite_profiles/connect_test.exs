@@ -30,7 +30,7 @@ defmodule SpriteProfiles.ConnectTest do
              "description" => "sprite-profiles: acme/profiles/github-mcp@v1",
              "access_policy" => %{
                "sprite_labels" => ["profile:acme.github-mcp"],
-               "allowed_endpoints" => ["/mcp/*"]
+               "allowed_endpoints" => ["/mcp/"]
              }
            }
 

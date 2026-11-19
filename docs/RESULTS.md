@@ -178,3 +178,89 @@ The tests check that a locked plan or launch makes no ref lookup.
 
 Not shown: a private repository (not supported), a tag (the live check used a branch; tags,
 annotated tags and a tag that moves are covered by tests against a stub).
+
+## Inputs and a custom API connector, end to end
+
+Tested on 2026-11-19 on one fresh Sprite, destroyed afterwards, with the setup of "A
+company's credential" above: httpbin.org as the company, and a dummy token. The throwaway
+profile (outside the repository) declared a custom API connector to `https://httpbin.org`
+with `endpoints = ["/anything/*"]` and a `test_url`, a required input `greeting` with a
+pattern, env from both, a service, and an MCP server with `auth = "connector"` whose
+header came from the input.
+
+**Creating the connector.** The function `mix profiles.connect` calls created it, and Fly's
+credential test answered `ok` (`HTTP 200 — Connection OK`). The listing gave the name as
+`provider_account_name`, the policy as written (`sprite_labels`, `allowed_endpoints`), and
+in `provider_info` the base URL as `base_api_url`, with `auth_method`,
+`auth_header_prefix`, `test_url` and the description. So the launcher's base-URL check
+runs; it is not skipped. Running `mix profiles.connect` again, in a pseudo-terminal, updated
+the same connector in place (same id, new `updated_at`). The token was not echoed and does
+not appear in the session's transcript. With standard input not a terminal, the command
+refused (`needs_terminal`) before asking.
+
+Under Mix, `:io.get_password/0` answers `{:error, :enotsup}`: Mix runs without an Erlang
+shell, in cooked mode. In raw mode it reads a line without echoing it, so the command
+switches to raw mode for the token and back afterwards.
+
+**The launch**, with `-i greeting=...`:
+
+| step | time |
+|---|---:|
+| connectors (list, check name, policy, endpoints, base URL) | 0.36 s |
+| create (labels in the request) | 0.61 s |
+| policy | 0.33 s |
+| prepare | 0.70 s |
+| env | 0.23 s |
+| MCP server | 1.38 s |
+| service | 5.35 s |
+| checkpoint | 0.29 s |
+| **total** | **9.25 s** |
+
+Inside the Sprite:
+
+- The env file held the gateway URL and the input's value. The service, which wrote its
+  own environment to a file when it started, had the same two variables: services now get
+  their phase's env.
+- A call to the gateway URL reached httpbin, whose echo showed `Authorization: Bearer
+  <the dummy token>`, added by the gateway.
+- **Client headers pass through.** The same call carried `X-MCP-Toolsets: repos,issues`,
+  `X-MCP-Readonly: true` and the input as `X-Greeting`, and httpbin echoed all three. So
+  inputs can reach a remote MCP server as request headers, as the `github-mcp` example
+  needs.
+- **Response headers come back.** With the policy widened for a moment to httpbin's
+  `/response-headers`, a call asking for `Mcp-Session-Id: sess-123` got that header back
+  through the gateway. Whether a real MCP server's session then works was not tested.
+- A path outside the policy (`/get`) answered 403 `endpoint is not in allowed list`.
+- The token was in none of: the shell's environment, the env file, `~/.claude.json`, the
+  service's environment.
+- Claude Code registered the MCP server with `${ECHO_URL}` and `${ECHO_GREETING}` as
+  written; they are expanded from the environment when Claude Code runs. httpbin is not
+  an MCP server, so `claude mcp list` was not part of this check.
+
+**Exact endpoints.** With the policy narrowed to `/anything/exact/`:
+
+| path called | answer |
+|---|---|
+| `/anything/exact/` | 200 |
+| `/anything/exact` | 403 |
+| `/anything/exact/more` | 403 |
+
+An exact pattern admits that path alone, trailing slash included. Claude Code calls an
+MCP server's URL as written, so the `github-mcp` example now declares the exact `/mcp/`
+rather than `/mcp/*`.
+
+**Refusals**, each with nothing created:
+
+| how | code |
+|---|---|
+| before the connector existed | `connector_missing`, naming `mix profiles.connect -p m6echo` |
+| no `-i greeting` | `input_missing` |
+| `-i greeting=KIA ORA` (fails the pattern) | `input_invalid` |
+| policy narrowed to `/anything/exact/` | `connector_endpoints` |
+| policy's label changed to another profile's | `connector_not_admitted` |
+| the profile's `base_url` changed to `https://httpbin.org/anything` | `connector_base_url` |
+
+The connector was then deleted (`DELETE /v1/oauth/connections/<id>` answered 204).
+
+Not shown: a real company's API or MCP server through a connector made by
+`mix profiles.connect`. That is the `github-mcp` check, which needs a real GitHub token.

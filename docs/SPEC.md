@@ -92,6 +92,15 @@ sha   = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
 name  = "linear"
 ```
 
+`format = 2` adds inputs, custom API connectors and MCP `auth = "connector"`. A profile
+that uses a format-2 field must declare `format = 2` (`needs_format`), so an older
+reader refuses it with one `unsupported_format`. A lock holding inputs is `format = 2`:
+
+```toml
+[inputs]
+readonly = "false"
+```
+
 There is no publisher allowlist: a fetched profile's `setup.sh` runs with the Sprite's full
 access, like any other. What the set fetches is shown instead: the plan's **Sources**
 section, after the apply order and only when the set holds an address, names each address's
@@ -113,11 +122,31 @@ an error, not a silent no-op.
 | `checkpoint` | bool | `true`, or `false` when privileged | `false`: applied after the checkpoint, never saved in it. A privileged profile may not set `true` |
 | `timeout` | string | `"10m"` | how long `setup.sh` may take: a whole number of `s`, `m` or `h`, at most `1h` |
 | `labels` | array of strings | `[]` | extra Sprite labels; at most 128 characters of lowercase letters, digits and `. _ : -`. Labels starting `profile:` are reserved |
+| `[inputs]` | table of tables | none | values the launcher is given at launch; see below (format 2) |
 | `[env]` | table | none | env for the Sprite; see below |
 | `[policy]` | table | none | network policy rules; see below |
-| `[[connectors]]` | array of tables | none | connectors this profile needs, each `{ provider = "github" }` |
+| `[[connectors]]` | array of tables | none | connectors this profile needs: `{ provider = "github" }` for a catalogue provider, or a custom API connector (format 2); see below |
 | `[[services]]` | array of tables | none | Sprites services to create; see below |
 | `[claude]` | table | none | `settings` (a Claude Code settings fragment) and `mcp_servers` |
+
+#### inputs
+
+An input is a value the launcher is given at launch, such as a repository, a workspace
+or a region. It is **never a secret**: inputs appear in plans, lock files and launch
+records. A secret is a connector's or a privileged profile's.
+
+```toml
+[inputs.readonly]
+summary = "true: only read tools; false: write tools too"   # required, one line, ≤ 80
+default = "true"            # optional; absent means the input must be given
+pattern = '^(true|false)$'  # optional; matched against the whole value
+```
+
+Names are `[a-z][a-z0-9_]{0,30}`. A value is a string of at most 256 characters on one
+line. A `default` must match `pattern`. An input reaches the Sprite only through
+`[env]`, as `{ from = "input", name = "readonly" }`; an input no env uses is refused
+(`input_unused`). Values are given as `--input name=value` (`-i`) to `plan`, `launch`
+and `lock`, or by a lock's `[inputs]` table; `--lock` with `-i` is bad usage.
 
 #### env
 
@@ -129,6 +158,7 @@ reserved: the launcher sets them for every `setup.sh`. A value is one of:
 | `"text"` | the value itself |
 | `{ from = "connector", provider = "github" }` | the connector's gateway URL, resolved at launch. The profile must also declare that connector |
 | `{ secret = "NAME" }` | read at launch from the launching machine, never from the repository. **Only a privileged profile may use it** |
+| `{ from = "input", name = "readonly" }` | the input's value, resolved before launch (format 2) |
 
 #### policy
 
@@ -139,6 +169,34 @@ rules = [ { include = "defaults" }, { action = "allow", domain = "api.sprites.de
 
 A rule is `{ include = "defaults" }` (the Sprites default list) or
 `{ action = "allow" | "deny", domain = "example.com" }`. A domain may start with `*.`.
+
+#### connectors
+
+`{ provider = "github" }` names a catalogue provider. A **custom API connector** wraps
+any token-authenticated HTTP API or remote MCP server:
+
+```toml
+[[connectors]]
+provider  = "custom_api"
+base_url  = "https://api.githubcopilot.com"              # https, no query
+auth      = { method = "header", prefix = "Bearer" }     # the default
+endpoints = ["/mcp/"]                                    # /exact or /prefix*; what the profile calls
+test_url  = "https://api.github.com/user"                # optional; the credential test
+```
+
+`auth.method` is `header` (`prefix`, default `Bearer`; `""` sends the bare token),
+`custom_header` (`header`, default `X-Api-Key`), `query_param` (`param`, default
+`api_key`) or `url_path` (`template`, holding `{token}`; its `test_url` is then a path,
+which Fly joins to the base URL and the token's path). A profile declares at most one
+custom API connector (`duplicate_connector`); **its name is the profile's qualified
+name**, `github.mcp` for `github/sprite-profiles/mcp@v1`. Env reaches its gateway URL
+with `{ from = "connector", provider = "custom_api" }`. The profile holds no token: a
+person creates the connector in their org with `mix profiles.connect -p <pick>`, which
+reads the token from the terminal, sends it to Fly once, and keeps nothing.
+
+An endpoint is matched as Fly's gateway matches it: `/exact` admits that path alone (a
+trailing `/` counts, so `/mcp/` does not admit `/mcp`), and `/prefix*` every path starting
+with `prefix`.
 
 #### services
 
@@ -170,6 +228,8 @@ An MCP server takes the fields Claude Code's own configuration takes (`type`, `u
 `headers`, `command`, `args`, `env`) plus two of ours, which are not passed on:
 
 - `auth = "none"`: the server needs no credentials.
+- `auth = "connector"`: the credential is added by the gateway; the `url` must start with
+  `${KEY}` where `KEY` is this profile's connector env.
 - `requires_env = ["NAME", ...]`: env the server needs from the set. References like
   `${NAME}` in `url`, `headers`, `env` or `args` count too; `${NAME:-default}` does not.
 
@@ -190,10 +250,11 @@ union where that is safe, refusal where two profiles disagree. Nothing is picked
 |---|---|---|
 | `env` | union; a key two profiles define is refused, **even with the same value** | `env_collision` |
 | `policy.rules` | union, deduplicated; `include = "defaults"` at most once; every `deny` before every `allow`, so a deny in any profile wins. No profile declares a policy: none is set (the Sprite's default, unrestricted). One does: the union is set, so a profile that needs the network must say so | |
-| `connectors` | union by provider. At launch, each must match an org connector whose access policy admits this Sprite: it allows all Sprites, or this Sprite carries **all** the labels it lists and its name starts with the name prefix it sets (whichever of the two it sets; a policy with neither admits nothing) | `connector_missing` |
+| `connectors` | union: catalogue providers by provider, custom API connectors by name (one per profile). At launch each must match an org connector that admits this Sprite (it allows all Sprites, or this Sprite carries **all** the labels it lists and its name starts with its name prefix, whichever of the two it sets; a policy with neither admits nothing). A custom connector must also cover every declared endpoint (no `allowed_endpoints`, or one that covers it, and no `blocked_endpoints` that overlaps it) and, when the API reports it, have the declared base URL | `connector_missing`, `connector_not_admitted`, `connector_endpoints`, `connector_base_url` |
+| `inputs` | union; a name two profiles declare is refused. A required input with no value, a value failing its pattern, or a value for a name no profile declares is refused before any API call | `input_collision`, `input_missing`, `input_invalid`, `input_unknown` |
 | `labels` | `profile:<qualified name>` for every pick, then declared labels, deduplicated. So a connector is granted to a *profile*: a connector whose policy names `profile:acme.linear` admits exactly the Sprites carrying acme's `linear`. A Sprite takes labels of up to 128 bytes | `label_too_long` |
 | `services` | union; the same name twice is refused; two services with `http_port` are refused, since a Sprite routes its URL to one service | `service_collision`, `http_port_conflict` |
-| `claude.mcp_servers` | union; the same name twice is refused. An `http`/`sse` server with no `Authorization` header and no `auth = "none"`, or any server needing env the set does not define, is refused before a Sprite is created: an unattended Sprite cannot answer a sign-in | `mcp_server_collision`, `mcp_needs_login` |
+| `claude.mcp_servers` | union; the same name twice is refused. An `http`/`sse` server with no `Authorization` header and neither `auth = "none"` nor `auth = "connector"`, or any server needing env the set does not define, is refused before a Sprite is created: an unattended Sprite cannot answer a sign-in | `mcp_server_collision`, `mcp_needs_login` |
 | `claude.settings` | deep merge of tables; a leaf two profiles set to different values is refused (the same value is fine). Arrays are leaves, except the ones Claude Code applies entry by entry: each `hooks.<event>` array and `permissions.allow` / `permissions.deny` **combine**, appending entries in pick order (each entry, such as one profile's hook group, kept whole) and keeping an identical entry once. A leaf in one profile where another has a table is refused. At launch each profile's settings are laid over the Sprite's own `~/.claude/settings.json` by the same rule: combining lists append, other leaves replace the image's | `settings_collision` |
 | skills | namespaced `<qualified name>--<skill>`, so they never collide | |
 | `files/` | pushed in pick order; the same path from two profiles is refused, as is a file where another profile has a folder (skills count as files here) | `file_collision` |
@@ -221,6 +282,7 @@ A refusal names a fetched profile by its pick as written, `acme/profiles/linear@
 | code | when |
 |---|---|
 | `unsupported_format` | `format` is newer than the reader knows; reported alone |
+| `needs_format` | a format-2 field in a profile declaring (or defaulting to) format 1 |
 | `missing_profile_toml` | the folder has no `profile.toml` |
 | `bad_toml` | `profile.toml` is not valid TOML 1.0 |
 | `missing_field` | `name` or `summary` is missing |
@@ -231,6 +293,9 @@ A refusal names a fetched profile by its pick as written, `acme/profiles/linear@
 | `secret_needs_privileged` | `{ secret = ... }` in a profile that is not privileged |
 | `privileged_checkpoint` | a privileged profile sets `checkpoint = true` |
 | `env_connector_undeclared` | env from a connector the profile does not declare |
+| `env_input_undeclared` | env from an input the profile does not declare |
+| `input_unused` | an input no `[env]` entry uses |
+| `duplicate_connector` | two custom API connectors in one profile |
 | `reserved_env` | env `PROFILED_PROFILE` or `PROFILED_SET` |
 | `reserved_label` | a declared label starting `profile:` |
 | `duplicate_service` | two services of one name in one profile |
@@ -249,7 +314,8 @@ another language should do the same, in this order:
    printed first. Two more refusals exist here: `secret_missing` (a privileged profile's
    secret is not on the launching machine) and `bad_sprite_name`.
 2. **Check connectors**, only when the set declares one: list the org's connectors and
-   apply the access-policy rule in the merge table. A refusal here creates nothing.
+   apply the rules in the merge table (access policy; for a custom API connector also its
+   name, endpoints and base URL). A refusal here creates nothing.
 3. **Create the Sprite with its labels** in the create request, then confirm them from the
    answer. If they did not stick, set the whole list again and read it back.
 4. **Set the network policy**, when the plan has one. It can only be set from outside the
@@ -266,15 +332,29 @@ another language should do the same, in this order:
      `.` written `--` since a Task name takes only `a-z`, `0-9` and `-`; extended
      every 60 s and released when the script ends, within its `timeout`, with
      `PROFILED_PROFILE`, `PROFILED_SET` and the env file loaded;
-   - create its services (`~` in `dir` is expanded). Services come after `setup.sh`, so a
-     service may run what the script installed.
+   - create its services (`~` in `dir` is expanded), each with that phase's env, the set
+     the env file holds. Services come after `setup.sh`, so a service may run what the
+     script installed.
 6. **Checkpoint** with the comment `profiled: <set>`.
 7. **Apply the privileged and `checkpoint = false` profiles** the same way. They are never in
    a checkpoint.
 8. **Record** the launch: the steps with their times, the labels and how they were set, the
-   policy, the env keys (never values), the sources (pick, owner, repo, path, ref, commit)
+   policy, the env keys (never values), the inputs (name and value), the sources (pick,
+   owner, repo, path, ref, commit)
    and the checkpoint id, as JSON under
    `~/.local/state/sprite-profiles/launches/`.
 
 A failed step stops the launch. The Sprite is left for inspection unless
 `--destroy-on-failure` was given.
+
+## Connecting a company's API
+
+`mix profiles.connect -p <pick>` creates or updates, in your org, the custom API
+connector a profile declares: name `<qualified name>`, its base URL, auth method and
+`test_url`, and an access policy that admits Sprites labelled `profile:<qualified
+name>` and allows the declared endpoints. The token is read from the terminal with echo
+off, sent to Fly once and never printed, logged or stored; the command refuses to run
+without a terminal (`needs_terminal`), takes no token flag, and is a person's, never an
+agent's. Running it again rotates the token and rewrites the policy. With a `test_url`,
+it then asks Fly to test the stored credential and reports the result. A pick that
+declares no custom API connector is refused (`no_custom_connector`).

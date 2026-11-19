@@ -37,7 +37,7 @@ defmodule Mix.Tasks.Profiles.ConnectTest do
 
     out = output()
     assert out =~ "Connector:  github-mcp  (custom_api)"
-    assert out =~ "Policy:     Sprites labelled profile:github-mcp; endpoints /mcp/*"
+    assert out =~ "Policy:     Sprites labelled profile:github-mcp; endpoints /mcp/"
     assert out =~ "gateway URL: https://api.sprites.dev/v1/gateway/custom_api/conn_custom"
     assert out =~ "test:        ok"
     refute out =~ @token

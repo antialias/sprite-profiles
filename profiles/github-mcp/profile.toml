@@ -34,7 +34,7 @@ rules = [
 provider  = "custom_api"
 base_url  = "https://api.githubcopilot.com"
 auth      = { method = "header", prefix = "Bearer" }
-endpoints = ["/mcp/*"]
+endpoints = ["/mcp/"]
 test_url  = "https://api.github.com/user"
 
 [claude.mcp_servers.github]

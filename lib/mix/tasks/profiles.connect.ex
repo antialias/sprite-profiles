@@ -133,18 +133,30 @@ defmodule Mix.Tasks.Profiles.Connect do
 
   defp terminal?, do: Keyword.get(:io.getopts(:standard_io), :stdin, false) == true
 
-  # Echo off. The token lives in this function's return value and the caller's variable,
-  # and nowhere else.
+  # Echo off. Under Mix the shell is "noshell" in cooked mode, where io:get_password/0
+  # answers {:error, :enotsup}; in raw mode it reads a line without echoing it. Cooked mode
+  # is restored afterwards. The token lives in this function's return value and the
+  # caller's variable, and nowhere else.
   defp read_token do
     IO.write(:stderr, "Token (input hidden): ")
 
-    case :io.get_password() do
-      chars when is_list(chars) ->
-        IO.write(:stderr, "\n")
-        chars |> List.to_string() |> String.trim()
+    try do
+      _ = :shell.start_interactive({:noshell, :raw})
+      :io.get_password()
+    after
+      _ = :shell.start_interactive({:noshell, :cooked})
+      IO.write(:stderr, "\n")
+    end
+    |> case do
+      v when is_binary(v) ->
+        String.trim(v)
+
+      v when is_list(v) ->
+        v |> List.to_string() |> String.trim()
 
       _ ->
-        ""
+        Mix.shell().error("This terminal cannot read a token with echo off; nothing was sent.")
+        exit({:shutdown, 1})
     end
   end
 
