@@ -36,22 +36,39 @@ defmodule SpriteProfiles.PickTest do
     assert {:ok, %Pick{version: {:ref, ^digits}}} = Pick.parse("@acme/linear@" <> digits)
   end
 
-  test "the owner is lowercased, and github.com is the same as no host" do
+  test "the owner keeps its case but compares without it, and github.com is no host" do
     assert {:ok, a} = Pick.parse("@Acme/linear@1")
     assert {:ok, b} = Pick.parse("@github.com/acme/linear@2")
     assert {:ok, c} = Pick.parse("@GitHub.com/ACME/linear")
-    assert a.ns == ["acme"]
+    assert a.ns == ["Acme"]
     assert Pick.identity(a) == Pick.identity(b)
     assert Pick.identity(b) == Pick.identity(c)
-    assert Pick.base(c) == "@acme/linear"
+    assert Pick.base(c) == "@ACME/linear"
+  end
+
+  test "versions are numbers as semver writes them, with no leading zeros" do
+    assert Pick.semver("1.20.0") == {:ok, [1, 20, 0]}
+    assert Pick.semver("0.1.0") == {:ok, [0, 1, 0]}
+    assert Pick.semver("01.2.0") == :error
+    assert Pick.semver("1.02.0") == :error
+    assert {:ok, %Pick{version: {:prefix, [1, 2]}}} = Pick.parse("@acme/linear@1.2")
+    assert {:ok, %Pick{version: {:prefix, [0]}}} = Pick.parse("@acme/linear@0")
+    # Written with a leading zero, it is a ref, not a version.
+    assert {:ok, %Pick{version: {:ref, "01.2"}}} = Pick.parse("@acme/linear@01.2")
+
+    {:ok, p} = Pick.parse("@acme/linear@1.2")
+    assert Pick.matches?(p, "1.2.9")
+    refute Pick.matches?(p, "1.20.0")
+    refute Pick.matches?(p, "01.2.0")
   end
 
   test "another host parses, with a port and a namespace of several segments" do
     assert {:ok, p} = Pick.parse("@git.example.com:3000/Team/Sub/linear@1")
     assert p.host == "git.example.com:3000"
-    assert p.ns == ["team", "sub"]
+    assert p.ns == ["Team", "Sub"]
     assert p.name == "linear"
-    assert Pick.base(p) == "@git.example.com:3000/team/sub/linear"
+    assert Pick.base(p) == "@git.example.com:3000/Team/Sub/linear"
+    assert Pick.identity(p) == "@git.example.com:3000/team/sub/linear"
     assert {:ok, %Pick{ns: ["team"]}} = Pick.parse("@localhost:8080/team/linear")
   end
 

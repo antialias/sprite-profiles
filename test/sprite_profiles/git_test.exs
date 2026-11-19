@@ -233,6 +233,22 @@ defmodule SpriteProfiles.GitTest do
       assert time < 5_000_000
     end
 
+    test "the timeout kills the children of git too", ctx do
+      script = Path.join(ctx.tmp, "parent-git")
+      pidfile = Path.join(ctx.tmp, "child.pid")
+
+      # A stand-in for git that starts a child, as git starts git-remote-https or ssh.
+      File.write!(script, "#!/bin/sh\nsleep 30 &\necho $! > #{pidfile}\nwait\n")
+      File.chmod!(script, 0o755)
+
+      assert {:error, %Refusal{code: :fetch_failed}} =
+               Git.ls_remote(ctx.url, git: script, timeout: 500)
+
+      child = pidfile |> File.read!() |> String.trim()
+      assert {_, status} = System.cmd("kill", ["-0", child], stderr_to_stdout: true)
+      assert status != 0, "the child #{child} outlived the timeout"
+    end
+
     test "git runs with prompts off and no askpass", ctx do
       script = Path.join(ctx.tmp, "env-git")
 
@@ -318,6 +334,28 @@ defmodule SpriteProfiles.GitTest do
                "/c/git.example.com/acme/p/#{sha}"
     end
 
+    test "a host that is not a host name is refused, so no path leaves the cache root" do
+      sha = String.duplicate("ab", 20)
+
+      for url <- [
+            "https://../x/y",
+            "https://./x/y",
+            "https://-x/y/z",
+            "https://a_b/x/y",
+            "ssh://../x/y",
+            "..:x/y",
+            "https://git.example.com/../y"
+          ] do
+        assert Git.repo_key(url) == :error, url
+        assert_raise ArgumentError, fn -> Git.cache_path(url, sha, cache_dir: "/c") end
+      end
+
+      assert Git.cached?("https://../x/y", sha, "", cache_dir: "/c") == false
+
+      assert {:error, %Refusal{code: :bad_address}} =
+               Git.fetch_cached("https://../x/y", sha, "", cache_dir: "/c")
+    end
+
     test "SPRITE_PROFILES_CACHE sets the root" do
       System.put_env("SPRITE_PROFILES_CACHE", "/elsewhere")
       on_exit(fn -> System.delete_env("SPRITE_PROFILES_CACHE") end)
@@ -332,5 +370,17 @@ defmodule SpriteProfiles.GitTest do
 
     assert {:error, %Refusal{message: msg}} = Git.ls_remote(url, git: "no-such-git-binary")
     refute msg =~ "secret"
+
+    # A password holding an '@', and a token in a query string.
+    assert Git.redact("fatal: https://user:p@ss@git.example.com/a/b.git?token=t0k#frag failed") ==
+             "fatal: https://git.example.com/a/b.git failed"
+
+    assert {:error, %Refusal{message: msg}} =
+             Git.ls_remote("https://u:p@ss@git.example.com/a/b.git?private_token=t0k",
+               git: "no-such-git-binary"
+             )
+
+    refute msg =~ "ss@"
+    refute msg =~ "t0k"
   end
 end

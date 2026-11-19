@@ -13,7 +13,9 @@ defmodule SpriteProfiles.Pick do
   alphabet; on another host it is one or more segments of `[A-Za-z0-9._-]`. `NAME` uses
   the profile name alphabet. `V` is a version prefix (`1`, `1.2`, `1.2.3`) or, written any
   other way, a ref (a branch, a tag or a 40-hex commit, which is a ref even when all its
-  digits are decimal). The namespace and host are kept lowercase.
+  digits are decimal). The host is lowercased; the namespace is kept as written, so a
+  server that tells case apart is asked for what was written, and compared
+  case-insensitively (`identity/1`).
   """
 
   alias SpriteProfiles.Profile
@@ -35,7 +37,8 @@ defmodule SpriteProfiles.Pick do
   @owner_re ~r/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
   @segment_re ~r/^[A-Za-z0-9._-]+$/
   @host_re ~r/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$/
-  @prefix_re ~r/^\d+(?:\.\d+){0,2}$/
+  # Numbers as semver writes them: no leading zeros.
+  @prefix_re ~r/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,2}$/
   @ref_re ~r/^[A-Za-z0-9._\/-]+$/
   @sha_re ~r/^[0-9a-fA-F]{40}$/
 
@@ -87,7 +90,7 @@ defmodule SpriteProfiles.Pick do
 
   defp parse_ns(@github, [owner, name]) do
     if Regex.match?(@owner_re, owner) and Profile.valid_name?(name),
-      do: {:ok, @github, [String.downcase(owner)], name},
+      do: {:ok, @github, [owner], name},
       else: {:error, :bad_name}
   end
 
@@ -97,7 +100,7 @@ defmodule SpriteProfiles.Pick do
     {ns, [name]} = Enum.split(segments, -1)
 
     if Enum.all?(ns, &good_segment?/1) and Profile.valid_name?(name),
-      do: {:ok, host, Enum.map(ns, &String.downcase/1), name},
+      do: {:ok, host, ns, name},
       else: {:error, :bad_name}
   end
 
@@ -131,7 +134,7 @@ defmodule SpriteProfiles.Pick do
   What makes two name picks the same profile, ignoring the version:
   `@HOST/NS/NAME`, lowercased. It never equals an address's identity.
   """
-  def identity(%__MODULE__{} = p), do: "@#{p.host}/#{ns(p)}/#{p.name}"
+  def identity(%__MODULE__{} = p), do: String.downcase("@#{p.host}/#{ns(p)}/#{p.name}")
 
   @doc "The pick without its version, as a person writes it: `@NS/NAME` on GitHub."
   def base(%__MODULE__{host: @github} = p), do: "@#{ns(p)}/#{p.name}"
@@ -147,9 +150,12 @@ defmodule SpriteProfiles.Pick do
 
   def matches?(_, _), do: false
 
-  @doc "Parses `MAJOR.MINOR.PATCH` (no pre-release) into a list of three integers."
+  @doc """
+  Parses `MAJOR.MINOR.PATCH` (no pre-release, no leading zeros, as semver writes it) into a
+  list of three integers.
+  """
   def semver(v) when is_binary(v) do
-    case Regex.run(~r/^(\d+)\.(\d+)\.(\d+)$/, v) do
+    case Regex.run(~r/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, v) do
       [_ | parts] -> {:ok, Enum.map(parts, &String.to_integer/1)}
       _ -> :error
     end

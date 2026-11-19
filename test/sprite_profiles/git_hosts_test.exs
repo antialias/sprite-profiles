@@ -30,7 +30,12 @@ defmodule SpriteProfiles.GitHostsTest do
 
   # The example host:
   #   team/sprite-profile-solo   solo at the root; v1.0.0 (s1), v1.1.0 (s2)
-  #   team/sprite-profiles       linear/ (linear/v1.0.0), links.toml: far -> platform/tools/far
+  #   team/sprite-profiles       linear/ (linear/v1.0.0); moved/ (moved/v1.0.0 on m0), since
+  #                              moved to profiles/moved/ (c1); draft/ (draft/v1.0.0);
+  #                              links.toml: far -> platform/tools/far, and bad entries
+  #   team/sprite-profile-linear a README, no tags: not linear's own repository
+  #   team/sprite-profile-draft  draft at the root, no tags: its own repository all the same
+  #   team/sprite-profile-ver    one commit tagged v1.2.0, v1.20.0 and v01.2.5
   #   team/platform              a monorepo: tools/far (tools/far/v0.2.0), its own v9.0.0, and
   #                              a symlink outside tools/far
   #   group/sub/tools            linear/ at main (a namespace of two segments)
@@ -47,16 +52,36 @@ defmodule SpriteProfiles.GitHostsTest do
     File.mkdir_p!(Path.join(base, "team"))
     bare!(work, Path.join(base, "team/sprite-profile-solo.git"))
 
+    coll = init!(Path.join([ctx.tmp_dir, "work", "collection"]))
+    m0 = commit!(coll, %{"moved/profile.toml" => toml("moved")})
+    tag!(coll, "moved/v1.0.0")
+    File.rm_rf!(Path.join(coll, "moved"))
+
     c1 =
-      publish(
-        ctx,
-        "team/sprite-profiles",
-        %{
-          "linear/profile.toml" => toml("linear"),
-          "links.toml" => ~s(far = "platform/tools/far"\n)
-        },
-        ["linear/v1.0.0"]
-      )
+      commit!(coll, %{
+        "profiles/moved/profile.toml" => toml("moved"),
+        "linear/profile.toml" => toml("linear"),
+        "draft/profile.toml" => toml("draft"),
+        "links.toml" => """
+        far = "platform/tools/far"
+        dots = "platform/../tools/dots"
+        dot = "platform/./dot"
+        stranger = "platform/tools/far"
+        """
+      })
+
+    tag!(coll, "linear/v1.0.0")
+    tag!(coll, "draft/v1.0.0")
+    bare!(coll, Path.join(base, "team/sprite-profiles.git"))
+
+    publish(ctx, "team/sprite-profile-linear", %{"README.md" => "not a profile\n"}, [])
+    publish(ctx, "team/sprite-profile-draft", %{"profile.toml" => toml("draft")}, [])
+
+    publish(ctx, "team/sprite-profile-ver", %{"profile.toml" => toml("ver")}, [
+      "v1.2.0",
+      "v1.20.0",
+      "v01.2.5"
+    ])
 
     p1 =
       publish(
@@ -80,7 +105,17 @@ defmodule SpriteProfiles.GitHostsTest do
       git_hosts: %{@host => "file://" <> base}
     ]
 
-    {:ok, base: base, opts: opts, solo_work: work, s1: s1, s2: s2, c1: c1, p1: p1, g1: g1, d1: d1}
+    {:ok,
+     base: base,
+     opts: opts,
+     solo_work: work,
+     s1: s1,
+     s2: s2,
+     m0: m0,
+     c1: c1,
+     p1: p1,
+     g1: g1,
+     d1: d1}
   end
 
   defp find(picks, opts), do: Resolver.find(picks, [], opts)
@@ -108,12 +143,55 @@ defmodule SpriteProfiles.GitHostsTest do
       assert old.source.sha == ctx.s1
     end
 
-    test "the collection's folder, versioned by its tags", ctx do
+    test "the collection's folder, versioned by its tags, past a repository named like its own that holds no profile",
+         ctx do
       assert {:ok, [p]} = find(["@git.example.com/team/linear@1"], ctx.opts)
       assert p.qualified == "git.example.com.team.linear"
 
       assert {p.source.repo, p.source.path, p.source.ref, p.source.sha} ==
                {"sprite-profiles", "linear", "linear/v1.0.0", ctx.c1}
+    end
+
+    test "a repository of its own with a profile.toml and no tags still wins", ctx do
+      assert {:error, [r]} = find(["@git.example.com/team/draft"], ctx.opts)
+      assert r.code == :no_versions
+      assert r.message =~ "git.example.com/team/sprite-profile-draft"
+
+      assert {:ok, [p]} = find(["@git.example.com/team/draft@main"], ctx.opts)
+      assert {p.source.repo, p.source.path} == {"sprite-profile-draft", ""}
+    end
+
+    test "a folder moved to profiles/NAME/ is found there, whatever tags it left behind",
+         ctx do
+      assert {:ok, [p]} = find(["@git.example.com/team/moved@main"], ctx.opts)
+      assert {p.source.path, p.source.sha} == {"profiles/moved", ctx.c1}
+
+      # Its old tags are not its versions any more.
+      assert {:error, [r]} = find(["@git.example.com/team/moved@1"], ctx.opts)
+      assert r.code == :version_not_found
+    end
+
+    test "a version prefix matches whole numbers, and a leading zero is no version", ctx do
+      ref = fn pick ->
+        {:ok, [p]} = find([pick], ctx.opts)
+        p.source.ref
+      end
+
+      assert ref.("@git.example.com/team/ver") == "v1.20.0"
+      assert ref.("@git.example.com/team/ver@1") == "v1.20.0"
+      assert ref.("@git.example.com/team/ver@1.2") == "v1.2.0"
+      assert ref.("@git.example.com/team/ver@1.20") == "v1.20.0"
+
+      assert {:error, [%{code: :version_not_found}]} =
+               find(["@git.example.com/team/ver@1.2.5"], ctx.opts)
+    end
+
+    test "a links.toml entry outside REPO/path ending in the name is bad_links", ctx do
+      for name <- ~w(dots dot stranger) do
+        assert {:error, [r]} = find(["@git.example.com/team/#{name}"], ctx.opts), name
+        assert r.code == :bad_links, name
+        assert r.message =~ "git.example.com/team/sprite-profiles's links.toml", name
+      end
     end
 
     test "links.toml, read with git, points into a monorepo whose symlink outside the folder is no fault",
@@ -307,6 +385,27 @@ defmodule SpriteProfiles.GitHostsTest do
       assert Enum.map(again, & &1.qualified) == Enum.map(profiles, & &1.qualified)
     end
 
+    test "a name entry whose repository or folder climbs out is bad_lock", ctx do
+      {:ok, profiles} = find(["@git.example.com/team/far"], ctx.opts)
+      good = Lock.encode(Lock.entries(profiles))
+      assert good =~ ~s(repo    = "platform"\n)
+      assert good =~ ~s(path    = "tools/far"\n)
+
+      for {why, text} <- [
+            {"repo ..", String.replace(good, ~s(repo    = "platform"), ~s(repo    = ".."))},
+            {"repo .", String.replace(good, ~s(repo    = "platform"), ~s(repo    = "."))},
+            {"path ../x", String.replace(good, ~s(path    = "tools/far"), ~s(path    = "../x"))},
+            {"path a/../b",
+             String.replace(good, ~s(path    = "tools/far"), ~s(path    = "tools/../far"))},
+            {"path /abs", String.replace(good, ~s(path    = "tools/far"), ~s(path    = "/etc"))}
+          ] do
+        path = Path.join(ctx.tmp_dir, "bad.lock")
+        File.write!(path, text)
+        assert {:error, [r]} = Lock.read(path), why
+        assert r.code == :bad_lock, why
+      end
+    end
+
     test "an address entry must agree with its host", ctx do
       {:ok, profiles} = find(["git.example.com/team/sprite-profiles/linear@main"], ctx.opts)
       good = Lock.encode(Lock.entries(profiles))
@@ -315,7 +414,8 @@ defmodule SpriteProfiles.GitHostsTest do
       for {why, text} <- [
             {"no host", String.replace(good, ~s(host  = "git.example.com"\n), "")},
             {"another host",
-             String.replace(good, ~s(host  = "git.example.com"), ~s(host  = "github.com"))}
+             String.replace(good, ~s(host  = "git.example.com"), ~s(host  = "github.com"))},
+            {"another owner's case", String.replace(good, ~s(owner = "team"), ~s(owner = "Team"))}
           ] do
         path = Path.join(ctx.tmp_dir, "bad.lock")
         File.write!(path, text)

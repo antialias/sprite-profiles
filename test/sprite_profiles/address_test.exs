@@ -10,7 +10,7 @@ defmodule SpriteProfiles.AddressTest do
           {"acme/linear@v1", "acme", "linear", "", "v1"},
           {"acme/profiles/linear@v1", "acme", "profiles", "linear", "v1"},
           {"acme/sprites/profiles/linear@#{@sha}", "acme", "sprites", "profiles/linear", @sha},
-          {"Acme/Profiles/Linear@main", "acme", "profiles", "Linear", "main"},
+          {"Acme/Profiles/Linear@main", "Acme", "Profiles", "Linear", "main"},
           {"acme/my.repo_x/a-b@feature/x", "acme", "my.repo_x", "a-b", "feature/x"}
         ] do
       assert {:ok, %Address{owner: ^owner, repo: ^repo, path: ^path, ref: ^ref}} =
@@ -48,7 +48,7 @@ defmodule SpriteProfiles.AddressTest do
 
   test "an address on another host: HOST/OWNER/REPO[/path]@ref, or .git after a namespace" do
     for {pick, host, owner, repo, path} <- [
-          {"git.example.com/Team/Profiles/linear@v1", "git.example.com", "team", "profiles",
+          {"Git.Example.com/Team/Profiles/linear@v1", "git.example.com", "Team", "Profiles",
            "linear"},
           {"git.example.com/team/profiles.git/linear@v1", "git.example.com", "team", "profiles",
            "linear"},
@@ -76,8 +76,8 @@ defmodule SpriteProfiles.AddressTest do
   test "derived forms on another host" do
     {:ok, a} = Address.parse("Git.Example.com:3000/Team/Profiles/linear@v1")
     assert Address.identity(a) == "git.example.com:3000/team/profiles.git/linear"
-    assert Address.to_string(a) == "git.example.com:3000/team/profiles/linear@v1"
-    assert Address.repo_slug(a) == "git.example.com:3000/team/profiles"
+    assert Address.to_string(a) == "git.example.com:3000/Team/Profiles/linear@v1"
+    assert Address.repo_slug(a) == "git.example.com:3000/Team/Profiles"
     assert Address.qualified(a, "linear") == "git.example.com-3000.team.linear"
 
     {:ok, deep} = Address.parse("git.example.com/group/sub/tools.git/linear@main")
@@ -109,7 +109,7 @@ defmodule SpriteProfiles.AddressTest do
   test "derived forms" do
     {:ok, a} = Address.parse("Acme/Profiles/linear@v1")
     assert Address.identity(a) == "acme/profiles/linear"
-    assert Address.to_string(a) == "acme/profiles/linear@v1"
+    assert Address.to_string(a) == "Acme/Profiles/linear@v1"
     assert Address.qualified(a, "linear") == "acme.linear"
     assert Address.expected_name(a) == "linear"
 

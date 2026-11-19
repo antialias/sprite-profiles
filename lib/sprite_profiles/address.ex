@@ -4,15 +4,16 @@ defmodule SpriteProfiles.Address do
   or `HOST/OWNER/REPO[/path]@ref` on another git host.
 
   `owner/repo` is the repository, `path` (optional) the folder in it that holds
-  `profile.toml`, and `ref` a tag, a branch or a 40-hex commit. The ref is required. Owner
-  and repository are compared case-insensitively and kept lowercase; the path and the ref
-  are kept as written.
+  `profile.toml`, and `ref` a tag, a branch or a 40-hex commit. The ref is required. The
+  host is lowercased; owner, repository, path and ref are kept as written, so a server that
+  tells case apart is asked for what was written. Owner and repository are compared
+  case-insensitively: `identity/1` and `qualified/2` lowercase them.
 
   A first segment holding a `.` or a `:` is a host (`host` or `host:port`); `github.com` is
   the same as no host. On GitHub the owner is one segment in GitHub's owner alphabet. On
   another host the owner is one segment, unless the repository is marked by a `.git`
   ending, as Go does: everything before that segment is the namespace, so GitLab subgroups
-  read `gitlab.example.com/group/sub/repo.git/path@ref`. A `.git` ending is dropped wherever
+  read `git.example.com/group/sub/repo.git/path@ref`. A `.git` ending is dropped wherever
   it is written.
 
   `SpriteProfiles.Pick.kind/1` says whether a pick is an address at all.
@@ -59,8 +60,8 @@ defmodule SpriteProfiles.Address do
       {:ok,
        %__MODULE__{
          host: host,
-         owner: String.downcase(owner),
-         repo: String.downcase(repo),
+         owner: owner,
+         repo: repo,
          path: Enum.join(path, "/"),
          ref: ref
        }}
@@ -162,7 +163,8 @@ defmodule SpriteProfiles.Address do
   `<host>.<ns…>.<name>`, lowercased, with a port's `:` written as `-`. A GitHub qualified
   name has exactly one `.` and another host's has at least two, so they never collide.
   """
-  def qualified(%__MODULE__{host: @github, owner: owner}, name), do: "#{owner}.#{name}"
+  def qualified(%__MODULE__{host: @github, owner: owner}, name),
+    do: "#{String.downcase(owner)}.#{name}"
 
   def qualified(%__MODULE__{host: host, owner: owner}, name) do
     [host | String.split(owner, "/")]
@@ -176,15 +178,16 @@ defmodule SpriteProfiles.Address do
   The address without its ref: what makes two picks the same profile. On another host the
   repository keeps its `.git`, so a namespace of several segments reads one way only.
   """
-  def identity(%__MODULE__{} = a), do: Enum.join([where(a) | path_parts(a)], "/")
+  def identity(%__MODULE__{} = a),
+    do: Enum.join([String.downcase(where(a)) | path_parts(a)], "/")
 
   @doc "The repository: `owner/repo` on GitHub, `host/ns…/repo` elsewhere."
   def repo_slug(%__MODULE__{host: @github, owner: o, repo: r}), do: "#{o}/#{r}"
   def repo_slug(%__MODULE__{host: h, owner: o, repo: r}), do: "#{h}/#{o}/#{r}"
 
   @doc """
-  The address as written, with host, owner and repository lowercased; the host is left out
-  on GitHub, and a namespace of several segments marks its repository with `.git`.
+  The address as written, with the host lowercased; the host is left out on GitHub, and a
+  namespace of several segments marks its repository with `.git`.
   """
   def to_string(%__MODULE__{} = a) do
     Enum.join([written(a) | path_parts(a)], "/") <> "@" <> a.ref

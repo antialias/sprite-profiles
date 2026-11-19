@@ -48,7 +48,8 @@ A pick may also be an **address** on GitHub: `owner/repo[/path]@ref`, the form G
 Actions uses. `owner/repo` is the repository, `path` (optional) the folder in it that
 holds `profile.toml`, and `ref` a tag, a branch or a 40-hex commit. The ref is required
 (`address_needs_ref`). The publisher is the owner; a tag is a version. Owner and repository
-are compared case-insensitively. A first segment holding a `.` or a `:` is a host (see
+are compared case-insensitively, and fetched as written, so a server that tells case apart
+gets what was written. A first segment holding a `.` or a `:` is a host (see
 "Profiles on other git hosts"); `github.com/owner/repo@ref` is the same as
 `owner/repo@ref`.
 
@@ -140,12 +141,16 @@ other git hosts"). A malformed name is `bad_name`.
 owner controls all of them, so the order is never a guess:
 
 1. **Its own repository**, `owner/sprite-profile-<name>`, with `profile.toml` at the root.
-   Versions are tags `vX.Y.Z`.
+   Versions are tags `vX.Y.Z`. It counts only when it has a `vX.Y.Z` tag or a
+   `profile.toml` at its default branch; a repository of that name with neither is passed
+   over, and the collection is asked.
 2. **The owner's collection**, `owner/sprite-profiles`, with the profile in the folder
    `<name>/` or `profiles/<name>/`. Versions are tags `<folder>/vX.Y.Z`; when the folder has
    none, the collection's own `vX.Y.Z` tags. A folder is the collection's when it holds a
-   `profile.toml` at the default branch, or has version tags. Both folders at once is
-   refused (`name_ambiguous`).
+   `profile.toml` at the default branch. Only when neither folder does is a folder with
+   version tags the collection's, so a profile moved from `<name>/` to `profiles/<name>/`
+   is found where it is now, whatever tags it left behind. Both folders at once is refused
+   (`name_ambiguous`).
 3. **A pointer** in `links.toml` at the collection's root, read at its default branch:
 
    ```toml
@@ -166,7 +171,9 @@ name it was picked by (`name_mismatch`).
 **Versions.** After the `@`:
 
 - `1`, `1.2` or `1.2.3` is a prefix: the newest version that matches, compared as numbers
-  (`1.10.0` is newer than `1.9.0`). Pre-releases (`v2.0.0-rc1`) are ignored. No match is
+  (`1.10.0` is newer than `1.9.0`; `@1.2` never matches `1.20.0`). Pre-releases
+  (`v2.0.0-rc1`) are ignored, and so is a tag with a leading zero (`v01.2.0`), as semver
+  writes numbers; a pick written with one (`@01.2`) is a ref. No match is
   refused (`version_not_found`), naming the versions there are.
 - Anything else is a ref, as in an address: a branch, a tag or a 40-hex commit, for
   development. A ref pick has no version.

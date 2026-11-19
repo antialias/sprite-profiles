@@ -86,8 +86,9 @@ defmodule SpriteProfiles.Git do
   @doc """
   The cache segments of a git URL, `{:ok, [host | path]}`, or `:error` for a URL this
   module will not hand to git. Accepted: `https://`, `http://`, `ssh://`, `git://`,
-  `file://` and the scp-like `user@host:path`. The host is lowercased, a port is appended
-  as `host-port`, userinfo is dropped, and a trailing `.git` is removed.
+  `file://` and the scp-like `user@host:path`. The host is lowercased and must be letters,
+  digits, `.` and `-`, starting with a letter or digit; a port is appended as `host-port`,
+  userinfo is dropped, and a trailing `.git` is removed.
 
       iex> SpriteProfiles.Git.repo_key("https://git.example.com/acme/profiles.git")
       {:ok, ["git.example.com", "acme", "profiles"]}
@@ -121,23 +122,27 @@ defmodule SpriteProfiles.Git do
             h -> String.downcase(h)
           end
 
-        host =
-          if host && uri.port && uri.port != @default_ports[scheme],
-            do: "#{host}-#{uri.port}",
-            else: host
-
-        if host, do: {:ok, host, uri.path || ""}, else: :error
+        if host && good_host?(host),
+          do: {:ok, port(host, uri, scheme), uri.path || ""},
+          else: :error
 
       String.contains?(url, "://") ->
         :error
 
       m = Regex.run(~r{^(?:[^@/:\s]+@)?([A-Za-z0-9][A-Za-z0-9.\-_]*):([^:].*)$}, url) ->
         [_, host, path] = m
-        {:ok, String.downcase(host), path}
+        host = String.downcase(host)
+        if good_host?(host), do: {:ok, host, path}, else: :error
 
       true ->
         :error
     end
+  end
+
+  defp good_host?(host), do: Regex.match?(~r/^[a-z0-9][a-z0-9.-]*$/, host)
+
+  defp port(host, uri, scheme) do
+    if uri.port && uri.port != @default_ports[scheme], do: "#{host}-#{uri.port}", else: host
   end
 
   defp strip_dot_git(segs) do
@@ -150,11 +155,19 @@ defmodule SpriteProfiles.Git do
   defp safe_segment?(s), do: s not in ["", ".", ".."] and not String.contains?(s, "\\")
 
   @doc """
-  The URL with any `user:password@` (or `token@`) removed, for sentences. Also applied to
-  everything git prints before it is quoted.
+  The URL with any `user:password@` (or `token@`, up to the last `@` before the host)
+  and any query string or fragment removed, for sentences. Also applied to everything git
+  prints before it is quoted.
+
+      iex> SpriteProfiles.Git.redact("https://user:p@ss@git.example.com/a/b.git?token=x#y")
+      "https://git.example.com/a/b.git"
   """
   @spec redact(String.t()) :: String.t()
-  def redact(text), do: Regex.replace(~r{(://)[^/@\s]*@}, text, "\\1")
+  def redact(text) do
+    text
+    |> then(&Regex.replace(~r{(://)[^/\s]*@}, &1, "\\1"))
+    |> then(&Regex.replace(~r{(://[^\s?#]*)[?#][^\s'"]*}, &1, "\\1"))
+  end
 
   ## cache
 
@@ -164,9 +177,14 @@ defmodule SpriteProfiles.Git do
   """
   @spec cache_path(String.t(), String.t(), keyword()) :: Path.t()
   def cache_path(url, sha, opts \\ []) do
-    case repo_key(url) do
-      {:ok, segs} -> Path.join([cache_root(opts) | segs] ++ [String.downcase(sha)])
-      :error -> raise ArgumentError, "not a git URL: #{redact(url)}"
+    root = cache_root(opts)
+
+    with {:ok, segs} <- repo_key(url),
+         path = Path.join([root | segs] ++ [String.downcase(sha)]),
+         true <- String.starts_with?(Path.expand(path), Path.expand(root) <> "/") do
+      path
+    else
+      _ -> raise ArgumentError, "not a git URL, or not one cached under #{root}: #{redact(url)}"
     end
   end
 
@@ -609,8 +627,8 @@ defmodule SpriteProfiles.Git do
     end
   end
 
-  # Runs git with no shell; output and errors are collected together. On the deadline the
-  # process is killed.
+  # Runs git with no shell; output and errors are collected together. On the deadline git
+  # and every process under it (found with pgrep) are killed.
   defp git(st, args, cwd) do
     if now() >= st.deadline do
       {:error, :timeout}
@@ -647,10 +665,13 @@ defmodule SpriteProfiles.Git do
     end
   end
 
+  # Kills git and everything under it (git-remote-https, ssh, a credential helper), found
+  # before any of them dies, since an orphan is no longer anyone's child.
   defp kill(port) do
     case Port.info(port, :os_pid) do
       {:os_pid, pid} ->
-        System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+        pids = [pid | descendants(pid)] |> Enum.map(&Integer.to_string/1)
+        System.cmd("kill", ["-KILL" | pids], stderr_to_stdout: true)
 
       _ ->
         :ok
@@ -663,6 +684,25 @@ defmodule SpriteProfiles.Git do
     end
 
     flush(port)
+  end
+
+  defp descendants(pid) do
+    case System.find_executable("pgrep") do
+      nil ->
+        []
+
+      pgrep ->
+        {out, _} = System.cmd(pgrep, ["-P", Integer.to_string(pid)], stderr_to_stdout: true)
+
+        out
+        |> String.split()
+        |> Enum.flat_map(fn s ->
+          case Integer.parse(s) do
+            {child, ""} -> [child | descendants(child)]
+            _ -> []
+          end
+        end)
+    end
   end
 
   defp flush(port) do

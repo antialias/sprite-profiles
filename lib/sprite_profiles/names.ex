@@ -5,7 +5,8 @@ defmodule SpriteProfiles.Names do
   versions are its tags. For `@NS/NAME`, the first match wins:
 
     1. **its own repository**, `NS/sprite-profile-NAME`, with `profile.toml` at the root;
-       versions are tags `vX.Y.Z`;
+       versions are tags `vX.Y.Z`. It counts when it has such a tag or a `profile.toml` at
+       its default branch; a repository of that name with neither is passed over;
     2. **the owner's collection**, `NS/sprite-profiles`, with the profile in folder `NAME/`
        or `profiles/NAME/`; versions are tags `<folder>/vX.Y.Z`, or the collection's own
        `vX.Y.Z` when the folder has none. Both folders is `name_ambiguous`;
@@ -13,8 +14,10 @@ defmodule SpriteProfiles.Names do
        `NAME = "REPO/path"`, a folder in another repository of the same owner; versions are
        tags `<path>/vX.Y.Z` there, never its plain `v` tags.
 
-  Nothing matching is `name_not_found`. A folder of the collection is its when, at the
-  default branch, it holds a `profile.toml`, or when it has version tags.
+  Nothing matching is `name_not_found`. A folder of the collection is its when it holds a
+  `profile.toml` at the default branch. Only when neither folder does is a folder with
+  version tags its, so a profile moved from `NAME/` to `profiles/NAME/` (its old tags left
+  behind) is found where it is now.
 
   The version: `@1`, `@1.2` and `@1.2.3` are prefixes, choosing the newest matching
   version, pre-releases ignored (`version_not_found`); anything else after `@` is a ref (a
@@ -76,17 +79,41 @@ defmodule SpriteProfiles.Names do
       true ->
         ns = Pick.ns(p)
 
-        case Host.remote(p.host, ns, own_repo(p.name), opts) do
-          {:ok, %{refs: refs}} ->
-            where = %{owner: ns, repo: own_repo(p.name), path: ""}
-            choose(p, refs, versions(refs, ""), where, "tag vX.Y.Z", opts)
-
-          {:error, :not_found, _} ->
-            in_collection(p, ns, opts)
-
-          {:error, %Refusal{} = r} ->
-            {:error, r}
+        with {:ok, remote} <- own(p, ns, opts) do
+          where = %{owner: ns, repo: own_repo(p.name), path: ""}
+          choose(p, remote.refs, versions(remote.refs, ""), where, "tag vX.Y.Z", opts)
+        else
+          :pass -> in_collection(p, ns, opts)
+          {:error, %Refusal{}} = error -> error
         end
+    end
+  end
+
+  # The repository of its own counts when it has a vX.Y.Z tag, or a profile.toml at its
+  # default branch; otherwise (or when there is none) the collection is asked.
+  defp own(p, ns, opts) do
+    case Host.remote(p.host, ns, own_repo(p.name), opts) do
+      {:ok, %{refs: refs} = remote} ->
+        cond do
+          versions(refs, "") != [] ->
+            {:ok, remote}
+
+          refs["HEAD"] == nil ->
+            :pass
+
+          true ->
+            case Host.read_files(remote, refs["HEAD"], ["profile.toml"], opts) do
+              {:ok, %{"profile.toml" => {:ok, _}}} -> {:ok, remote}
+              {:ok, _} -> :pass
+              {:error, %Refusal{}} = error -> error
+            end
+        end
+
+      {:error, :not_found, _} ->
+        :pass
+
+      {:error, %Refusal{}} = error ->
+        error
     end
   end
 
@@ -140,23 +167,22 @@ defmodule SpriteProfiles.Names do
     end
   end
 
-  # A folder is the collection's when it has version tags, or holds a profile.toml at the
-  # default branch. The files are read together: on git, that is one fetch.
+  # A folder is the collection's when it holds a profile.toml at the default branch; only
+  # when neither does, when it has version tags (a moved folder leaves its old tags behind).
+  # The files are read together: on git, that is one fetch.
   defp folders(p, remote, head, opts) do
     candidates = [p.name, "profiles/#{p.name}"]
-    tagged = Enum.filter(candidates, &(versions(remote.refs, &1 <> "/") != []))
-    to_read = if head, do: Enum.map(candidates -- tagged, &(&1 <> "/profile.toml")), else: []
 
     read =
-      if to_read == [],
-        do: {:ok, %{}},
-        else: Host.read_files(remote, head, to_read, opts)
+      if head,
+        do: Host.read_files(remote, head, Enum.map(candidates, &(&1 <> "/profile.toml")), opts),
+        else: {:ok, %{}}
 
     with {:ok, files} <- read do
-      {:ok,
-       Enum.filter(candidates, fn folder ->
-         folder in tagged or match?({:ok, _}, files[folder <> "/profile.toml"])
-       end)}
+      case Enum.filter(candidates, &match?({:ok, _}, files[&1 <> "/profile.toml"])) do
+        [] -> {:ok, Enum.filter(candidates, &(versions(remote.refs, &1 <> "/") != []))}
+        present -> {:ok, present}
+      end
     end
   end
 
@@ -226,9 +252,9 @@ defmodule SpriteProfiles.Names do
   end
 
   defp follow(p, ns, {repo, path}, opts) do
-    case Host.remote(p.host, ns, String.downcase(repo), opts) do
+    case Host.remote(p.host, ns, repo, opts) do
       {:ok, %{refs: refs}} ->
-        where = %{owner: ns, repo: String.downcase(repo), path: path}
+        where = %{owner: ns, repo: repo, path: path}
         choose(p, refs, versions(refs, path <> "/"), where, "tag #{path}/vX.Y.Z", opts)
 
       {:error, :not_found, why} ->
@@ -293,7 +319,7 @@ defmodule SpriteProfiles.Names do
         found.(v.tag, v.sha, :tag, v.version)
 
       {{:prefix, prefix}, _} ->
-        case Enum.find(list, &(Enum.take(&1.parts, length(prefix)) == prefix)) do
+        case Enum.find(list, &Pick.matches?(p, &1.version)) do
           nil ->
             {:error, version_not_found(p, slug, list, what, prefix, opts)}
 
@@ -316,14 +342,14 @@ defmodule SpriteProfiles.Names do
   end
 
   defp not_found(p, ns, pick, collection?) do
-    own = slug(p, ns, own_repo(p.name))
+    own = "no repository #{slug(p, ns, own_repo(p.name))} holding a profile"
     coll = slug(p, ns, @collection)
 
     looked =
       if collection?,
         do:
-          "no repository #{own}, no folder #{p.name}/ or profiles/#{p.name}/ in #{coll}, and no #{p.name} in its links.toml",
-        else: "no repository #{own} and no collection #{coll}"
+          "#{own}, no folder #{p.name}/ or profiles/#{p.name}/ in #{coll}, and no #{p.name} in its links.toml",
+        else: "#{own} and no collection #{coll}"
 
     who = if p.host == @github, do: "GitHub shows", else: "#{p.host} has"
 
