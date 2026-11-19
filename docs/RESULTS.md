@@ -303,3 +303,48 @@ Inside the Sprite:
 
 Not shown: a model driving the server from inside the Sprite (`claude -p` needs model
 access, which `claude-code` alone does not give), and an MCP server that only accepts OAuth.
+
+## A service publishing its own profile
+
+Tested on 2026-11-19 on one fresh Sprite, destroyed afterwards. A woodworking shop's
+inventory, which serves an MCP server behind its own bearer tokens, publishes a profile in
+its own repository:
+[antialias/shop-inventory-profile](https://github.com/antialias/shop-inventory-profile). The
+shop issued a token with only its `read` scope. A script stored it through
+`mix profiles.connect`'s own code, reading it from a file in place of the terminal, so
+nobody saw it. The profile declares no `test_url`, since the server has no GET that answers
+200 to a valid token, so Fly's credential test was skipped.
+
+- **A dot in the connector's name works.** A published pick's connector is named by its
+  qualified name, `antialias.shop-inventory`; Fly accepted it, and the label
+  `profile:antialias.shop-inventory` admitted the Sprite.
+- **Running connect again updates in place.** A first run with a dummy token created the
+  connector, and the run with the real token kept its id.
+
+The launch, by address:
+
+    mix profiles.launch -p claude-code -p antialias/shop-inventory-profile/shop-inventory@main --name <sprite>
+
+| step | time |
+|---|---:|
+| connectors | 0.44 s |
+| create | 0.48 s |
+| claude-code | 4.42 s |
+| antialias.shop-inventory (skill, MCP server) | 1.95 s |
+| checkpoint | 0.48 s |
+| **total** | **9.96 s** |
+
+Inside the Sprite:
+
+- `claude mcp list` showed `shop: ${SHOP_INVENTORY_URL}/mcp (HTTP) - ✔ Connected`.
+- `tools/list` offered 15 tools, all reads (`search_items`, `get_item`, `check_fit`,
+  `tools_to_buy`, ...): the server gives a read token no tool that changes anything.
+- A `search_items` call for "table saw" returned the shop's table saw in 983 ms, through the
+  gateway; the answer held no purchase record, serial number or location.
+- The server keeps no MCP session (no `Mcp-Session-Id`), and Claude Code connected anyway.
+- Paths other than `/mcp` answered 403 at the gateway.
+- No token was in the environment, and `~/.claude.json` registered the server with the
+  gateway URL alone and no header.
+
+The service's side was one bearer token with a narrow scope, and a repository with a
+`profile.toml` and a skill. sprite-profiles holds no code for the shop.

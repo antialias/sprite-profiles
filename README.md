@@ -386,7 +386,10 @@ connector. Profiles can be picked by address from public GitHub repositories and
 on a real Sprite. Format 2 adds inputs and custom API connectors, with
 `mix profiles.connect`. `github-mcp` has been launched with a real GitHub token: Claude
 Code in the Sprite connected to GitHub's MCP server, its inputs chose the read-only
-toolsets, and the token never entered the Sprite. Next come the MCP server for agents and a
+toolsets, and the token never entered the Sprite. A service has published its own
+profile, [antialias/shop-inventory-profile](https://github.com/antialias/shop-inventory-profile):
+picked by address, it gave Claude Code in a Sprite read-only access to a shop's
+inventory through a connector. Next come the MCP server for agents and a
 web catalogue for picking a set.
 
 - [docs/SPEC.md](docs/SPEC.md): the profile format, the merge rules and the launch sequence.
