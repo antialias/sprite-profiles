@@ -117,7 +117,9 @@ defmodule SpriteProfiles.LauncherTest do
       assert policy == %{
                "rules" => [
                  %{"include" => "defaults"},
-                 %{"action" => "allow", "domain" => "mcp.context7.com"}
+                 %{"action" => "allow", "domain" => "mcp.context7.com"},
+                 %{"action" => "allow", "domain" => "console.anthropic.com"},
+                 %{"action" => "allow", "domain" => "platform.claude.com"}
                ]
              }
 

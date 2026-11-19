@@ -13,9 +13,13 @@ timeout     = "5m"
 DISABLE_AUTOUPDATER = "1"   # keep the Claude Code version that was checkpointed
 
 [policy]
+# The defaults leave out the hosts where claude.ai sign-in exchanges its code, so without
+# these two the sign-in fails on a Sprite with a network policy.
 rules = [
   { include = "defaults" },
   { action = "allow", domain = "mcp.context7.com" },
+  { action = "allow", domain = "console.anthropic.com" },
+  { action = "allow", domain = "platform.claude.com" },
 ]
 
 [claude.settings.env]

@@ -87,6 +87,8 @@ Connectors: none
 Network policy:
   include defaults
   allow mcp.context7.com
+  allow console.anthropic.com
+  allow platform.claude.com
   allow cdn.playwright.dev
   allow example.com
 
