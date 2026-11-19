@@ -7,11 +7,16 @@ defmodule SpriteProfiles.SetArgs do
 
   alias SpriteProfiles.Lock
 
+  @no_picks "name at least one profile, or give --lock FILE"
+
+  @doc "The bad-usage message for a set with no picks and no lock, the same everywhere."
+  def no_picks, do: @no_picks
+
   @doc """
   Returns `{:ok, picks, resolve_opts}` (with `:inputs`, `:offline` and, from a lock,
-  `:pins`), `{:usage, message}` when both `--profile` and `--lock` are given, `--lock`
-  comes with `-i`, or an `-i` is not `name=value`; or `{:error, refusals}` when the lock
-  cannot be read.
+  `:pins`), `{:usage, message}` when neither `--profile` nor `--lock` is given, both are,
+  `--lock` comes with `-i`, or an `-i` is not `name=value`; or `{:error, refusals}` when
+  the lock cannot be read.
   """
   def picks(opts) do
     profiles = Keyword.get_values(opts, :profile)
@@ -19,6 +24,9 @@ defmodule SpriteProfiles.SetArgs do
     offline = [offline: opts[:offline] || false]
 
     case {profiles, opts[:lock], given} do
+      {[], nil, _} ->
+        {:usage, @no_picks}
+
       {[_ | _], lock, _} when is_binary(lock) ->
         {:usage, "--lock and --profile name the set twice; give one of them"}
 
