@@ -380,13 +380,14 @@ which only the platform can provide.
 ## Status
 
 The profile format, the merge rules, `mix profiles.plan` and `mix profiles.launch` work
-today, and four of the six examples have been launched on real Sprites. `github` waits on a
+today, and five of the six examples have been launched on real Sprites. `github` waits on a
 connector. Profiles can be picked by address from public GitHub repositories and pinned with
 `mix profiles.lock`; a locked set mixing a local and a published profile has been launched
 on a real Sprite. Format 2 adds inputs and custom API connectors, with
-`mix profiles.connect`; they have been checked on a real Sprite against an echo service
-with a dummy token. `github-mcp` waits on a check with a real GitHub token. Next come the
-MCP server for agents and a web catalogue for picking a set.
+`mix profiles.connect`. `github-mcp` has been launched with a real GitHub token: Claude
+Code in the Sprite connected to GitHub's MCP server, its inputs chose the read-only
+toolsets, and the token never entered the Sprite. Next come the MCP server for agents and a
+web catalogue for picking a set.
 
 - [docs/SPEC.md](docs/SPEC.md): the profile format, the merge rules and the launch sequence.
 - [docs/RESULTS.md](docs/RESULTS.md): step timings on real Sprites.

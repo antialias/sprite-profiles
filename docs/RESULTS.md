@@ -262,5 +262,44 @@ rather than `/mcp/*`.
 
 The connector was then deleted (`DELETE /v1/oauth/connections/<id>` answered 204).
 
-Not shown: a real company's API or MCP server through a connector made by
-`mix profiles.connect`. That is the `github-mcp` check, which needs a real GitHub token.
+The real company's version of this check follows.
+
+## GitHub's MCP server, through a connector
+
+Tested on 2026-11-19 on one fresh Sprite, destroyed afterwards. The owner made a
+fine-grained GitHub token (read-only, 7 days) and stored it in a custom API connector named
+`github-mcp`: base URL `https://api.githubcopilot.com`, Bearer header, test URL
+`https://api.github.com/user`, admitting Sprites labelled `profile:github-mcp` on
+`/mcp/*`. The token went from the owner's clipboard to Fly in one command and was never
+shown. Fly's credential test answered `ok` (`HTTP 200 — Connection OK`, 287 ms). The
+connector predates `mix profiles.connect` and allows `/mcp/*` where the example declares
+`/mcp/`; the launch admitted it, since `/mcp/*` covers `/mcp/`.
+
+    mix profiles.launch -p claude-code -p github-mcp -i readonly=true -i toolsets=repos,issues --name <sprite>
+
+| step | time |
+|---|---:|
+| connectors | 0.38 s |
+| create | 0.88 s |
+| claude-code (policy, files, settings, MCP, setup) | 4.34 s |
+| github-mcp (skill, MCP server) | 2.03 s |
+| checkpoint | 0.55 s |
+| **total** | **9.80 s** |
+
+Inside the Sprite:
+
+- `claude mcp list` showed `github: ${GITHUB_MCP_URL}/mcp/ (HTTP) - ✔ Connected`, next to
+  context7.
+- `initialize` through the gateway returned an `Mcp-Session-Id`, and the calls that sent it
+  back worked: the session round-trip passes the gateway in both directions.
+- With `X-MCP-Toolsets: repos,issues` and `X-MCP-Readonly: true`, as the inputs set them,
+  `tools/list` gave 19 tools, all reads. With the readonly header set to `false`, 29,
+  among them `create_branch`, `push_files` and `delete_file`. So both headers reach GitHub,
+  and the input decides what Claude Code is offered. (The token is read-only too, so a write
+  would be refused by GitHub either way.)
+- A `tools/call` of `list_commits` on this repository returned its three latest commits.
+- `/mcp` without the slash answered 403; Claude Code never called it.
+- No token-shaped string was in the shell's environment, the env file or `~/.claude.json`.
+
+Not shown: a model driving the server from inside the Sprite (`claude -p` needs model
+access, which `claude-code` alone does not give), and an MCP server that only accepts OAuth.
