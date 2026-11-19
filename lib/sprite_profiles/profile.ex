@@ -13,7 +13,8 @@ defmodule SpriteProfiles.Profile do
   @name_re ~r/^[a-z][a-z0-9-]{1,30}$/
   @env_key_re ~r/^[A-Z_][A-Z0-9_]*$/
   @provider_re ~r/^[a-z][a-z0-9_]{0,40}$/
-  @label_re ~r/^[a-z0-9][a-z0-9_.:-]{0,62}$/
+  # Fly accepts labels of up to 128 bytes (measured; see docs/RESULTS.md).
+  @label_re ~r/^[a-z0-9][a-z0-9_.:-]{0,127}$/
   @service_re ~r/^[a-z][a-z0-9-]{0,30}$/
   @mcp_name_re ~r/^[A-Za-z0-9_-]{1,64}$/
   @skill_re ~r/^[a-z0-9][a-z0-9-]{0,62}$/
@@ -25,10 +26,13 @@ defmodule SpriteProfiles.Profile do
   @max_timeout 3600
   @default_timeout 600
 
+  # The newest profile format this reader knows.
+  @format 1
+
   # Exported by the launcher to every setup.sh; a profile may not define them.
   @reserved_env ~w(PROFILED_PROFILE PROFILED_SET)
 
-  @top_fields ~w(name summary description privileged checkpoint timeout labels env policy connectors services claude)
+  @top_fields ~w(format name summary description privileged checkpoint timeout labels env policy connectors services claude)
 
   @type env_value :: String.t() | {:connector, String.t()} | {:secret, String.t()}
   @type policy_rule :: :defaults | {:allow, String.t()} | {:deny, String.t()}
@@ -70,7 +74,20 @@ defmodule SpriteProfiles.Profile do
           setup: String.t() | nil,
           files: [file_entry()],
           skills: [skill()],
-          path: String.t() | nil
+          path: String.t() | nil,
+          format: pos_integer(),
+          qualified: String.t(),
+          pick: String.t(),
+          source: source() | nil
+        }
+
+  @typedoc "Where a fetched profile came from; nil for a local one."
+  @type source :: %{
+          owner: String.t(),
+          repo: String.t(),
+          path: String.t(),
+          ref: String.t(),
+          sha: String.t()
         }
 
   @enforce_keys [:name, :summary]
@@ -79,6 +96,10 @@ defmodule SpriteProfiles.Profile do
     :summary,
     :setup,
     :path,
+    :qualified,
+    :pick,
+    :source,
+    format: @format,
     description: "",
     privileged: false,
     checkpoint: true,
@@ -94,6 +115,9 @@ defmodule SpriteProfiles.Profile do
     skills: []
   ]
 
+  @doc "The newest profile format this reader knows."
+  def format, do: @format
+
   @doc "The pattern every profile name must match."
   def name_regex, do: @name_re
 
@@ -105,16 +129,25 @@ defmodule SpriteProfiles.Profile do
 
   @doc """
   Reads the profile folder at `dir`. The folder's base name is the profile's name.
+
+  Options: `:name`, the name the profile must declare instead (nil allows any name, as at
+  a repository root); `:display`, how sentences name the profile (default the name).
   """
-  @spec load(Path.t()) :: {:ok, t()} | {:error, [Error.t()]}
-  def load(dir) do
-    folder = Path.basename(dir)
+  @spec load(Path.t(), keyword()) :: {:ok, t()} | {:error, [Error.t()]}
+  def load(dir, opts \\ []) do
+    expected =
+      case Keyword.fetch(opts, :name) do
+        {:ok, name} -> name
+        :error -> Path.basename(dir)
+      end
+
+    folder = opts[:display] || expected || Path.basename(dir)
     toml_path = Path.join(dir, "profile.toml")
 
     with {:ok, text} <- read_toml(toml_path, folder),
          {:ok, map} <- decode_toml(text, folder),
          {:ok, found, disk_errors} <- scan_disk(dir, folder) do
-      case parse(map, Keyword.merge(found, folder: folder, path: dir)) do
+      case parse(map, Keyword.merge(found, folder: expected, display: folder, path: dir)) do
         {:ok, profile} when disk_errors == [] -> {:ok, profile}
         {:ok, _profile} -> {:error, disk_errors}
         {:error, errors} -> {:error, errors ++ disk_errors}
@@ -313,16 +346,43 @@ defmodule SpriteProfiles.Profile do
   Builds a profile from a decoded `profile.toml` map.
 
   Options: `:folder` (the folder name the `name` field must match; defaults to the
-  `name` field), `:path`, `:setup` (path of setup.sh or nil), `:files` and `:skills` (as
-  found on disk).
+  `name` field), `:display` (how sentences name the profile; defaults to the folder),
+  `:path`, `:setup` (path of setup.sh or nil), `:files` and `:skills` (as found on disk).
+
+  `format` is read first: a format newer than this reader's is refused alone
+  (`unsupported_format`), so a future field is one refusal rather than many.
   """
   @spec parse(map(), keyword()) :: {:ok, t()} | {:error, [Error.t()]}
   def parse(map, opts \\ []) when is_map(map) do
     raw_name = Map.get(map, "name")
     folder = Keyword.get(opts, :folder) || (is_binary(raw_name) && raw_name) || "?"
-    ctx = %{p: folder}
+    ctx = %{p: opts[:display] || folder}
 
-    {name, e_name} = parse_name(raw_name, folder, ctx)
+    case Map.get(map, "format", @format) do
+      f when is_integer(f) and f > @format ->
+        {:error,
+         err(
+           ctx,
+           :unsupported_format,
+           "is format #{f}; this launcher reads up to format #{@format}, so upgrade sprite-profiles."
+         )}
+
+      f when is_integer(f) and f >= 1 ->
+        parse_fields(map, f, folder, ctx, opts)
+
+      f ->
+        e_format =
+          err(ctx, :bad_field, "has format #{inspect(f)}; format is a whole number, 1 or more.")
+
+        case parse_fields(map, @format, folder, ctx, opts) do
+          {:ok, _} -> {:error, e_format}
+          {:error, errors} -> {:error, e_format ++ errors}
+        end
+    end
+  end
+
+  defp parse_fields(map, format, folder, ctx, opts) do
+    {name, e_name} = parse_name(Map.get(map, "name"), folder, ctx)
     e_unknown = unknown_keys(map, @top_fields, "", ctx)
     {summary, e_summary} = parse_summary(Map.get(map, "summary"), ctx)
     {description, e_desc} = string_field(map, "description", "", ctx)
@@ -349,7 +409,10 @@ defmodule SpriteProfiles.Profile do
     if errors == [] do
       {:ok,
        %__MODULE__{
+         format: format,
          name: name,
+         qualified: name,
+         pick: name,
          summary: summary,
          description: description,
          privileged: privileged,

@@ -239,4 +239,33 @@ defmodule SpriteProfiles.ProfileTest do
       assert {:error, [%{code: :bad_file}]} = Profile.load(dir)
     end
   end
+
+  describe "format" do
+    test "absent means 1, and 1 is read" do
+      assert profile!("aa").format == 1
+      assert profile!("aa", "format = 1").format == 1
+    end
+
+    test "a newer format is one unsupported_format, before any field check" do
+      assert {:error, [e]} = parse("aa", "format = 2\nnew_field = 1\n[inputs]\nx = 1\n")
+      assert e.code == :unsupported_format
+
+      assert e.message ==
+               "profile 'aa' is format 2; this launcher reads up to format 1, so upgrade sprite-profiles."
+    end
+
+    test "a format that is not a whole number is bad_field, with the other errors" do
+      assert {:error, errors} = parse("aa", ~s(format = "1"\nbogus = 1))
+      assert codes(errors) == [:bad_field, :unknown_field]
+      assert {:error, [%{code: :bad_field}]} = parse("aa", "format = 0")
+    end
+  end
+
+  describe "labels" do
+    test "a declared label may be up to 128 characters, the most a Sprite takes" do
+      ok = "team:" <> String.duplicate("a", 123)
+      assert profile!("aa", "labels = [#{inspect(ok)}]").labels == [ok]
+      assert {:error, [%{code: :bad_field}]} = parse("aa", "labels = [#{inspect(ok <> "a")}]")
+    end
+  end
 end

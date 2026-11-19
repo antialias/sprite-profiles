@@ -9,10 +9,17 @@ defmodule Mix.Tasks.Profiles.Plan do
       mix profiles.plan --profile claude-code --profile github
       mix profiles.plan --profile claude-code --profile anthropic-key --agent
       mix profiles.plan -p preview -p claude-code --dir path/to/profiles
+      mix profiles.plan -p claude-code -p antialias/sprite-profiles/profiles/preview@main
+      mix profiles.plan --lock sprite-profiles.lock --offline
 
   Options:
 
-    * `--profile`, `-p` - a profile to pick; repeat it, in the order to apply them
+    * `--profile`, `-p` - a profile to pick, by name or by address
+      (`owner/repo[/path]@ref`); repeat it, in the order to apply them
+    * `--lock` - a lock file written by `mix profiles.lock`: the set, with every address
+      pinned to a commit. Instead of `--profile`
+    * `--offline` - call nothing: an address must be pinned (by `--lock` or a full commit)
+      and its commit already cached
     * `--dir` - a folder holding profiles; repeat it to search several. With no `--dir` and
       no `SPRITE_PROFILES_PATH`, the search path is `profiles` plus
       `~/.config/sprite-profiles/profiles` when it exists
@@ -23,49 +30,61 @@ defmodule Mix.Tasks.Profiles.Plan do
 
   use Mix.Task
 
-  alias SpriteProfiles.{Merge, Plan, ProfilePath}
+  alias SpriteProfiles.{Merge, Plan, ProfilePath, Resolver, SetArgs}
 
-  @switches [profile: :keep, dir: :keep, agent: :boolean]
+  @switches [profile: :keep, dir: :keep, agent: :boolean, lock: :string, offline: :boolean]
   @aliases [p: :profile]
 
   @impl Mix.Task
   def run(argv) do
     Mix.Task.run("compile", [])
     Mix.Task.run("loadpaths", [])
+    Application.ensure_all_started(:req)
 
     case OptionParser.parse(argv, strict: @switches, aliases: @aliases) do
       {opts, [], []} ->
-        names = Keyword.get_values(opts, :profile)
         dirs = ProfilePath.dirs(Keyword.get_values(opts, :dir))
         caller = if opts[:agent], do: :agent, else: :person
-        plan(names, dirs, caller)
+
+        case SetArgs.picks(opts) do
+          {:ok, picks, resolve_opts} -> plan(picks, [dirs: dirs, caller: caller] ++ resolve_opts)
+          {:usage, message} -> usage(message)
+          {:error, problems} -> refused(problems)
+        end
 
       {_, args, invalid} ->
-        Mix.shell().error(
-          "usage: mix profiles.plan --profile NAME [--profile NAME ...] [--dir DIR ...] [--agent]" <>
-            unexpected(args, invalid)
-        )
-
-        exit({:shutdown, 2})
+        usage(unexpected(args, invalid))
     end
+  end
+
+  defp usage(extra) do
+    Mix.shell().error(
+      "usage: mix profiles.plan (--profile PICK [--profile PICK ...] | --lock FILE) [--offline] [--dir DIR ...] [--agent]" <>
+        if(extra == "", do: "", else: "\n" <> extra)
+    )
+
+    exit({:shutdown, 2})
   end
 
   defp unexpected([], []), do: ""
 
   defp unexpected(args, invalid) do
-    "\nnot understood: " <> Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " ")
+    "not understood: " <> Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " ")
   end
 
-  defp plan(names, dirs, caller) do
-    with :ok <- Merge.check_picks(names),
-         {:ok, profiles} <- ProfilePath.find(names, dirs),
-         {:ok, plan} <- Merge.merge(profiles, caller: caller) do
+  defp plan(picks, opts) do
+    with :ok <- Merge.check_picks(picks),
+         {:ok, profiles} <- Resolver.find(picks, opts[:dirs], opts),
+         {:ok, plan} <- Merge.merge(profiles, caller: opts[:caller]) do
       Mix.shell().info(Plan.format(plan))
     else
-      {:error, problems} ->
-        Mix.shell().error("Refused:")
-        Enum.each(problems, &Mix.shell().error("  [#{&1.code}] #{&1.message}"))
-        exit({:shutdown, 1})
+      {:error, problems} -> refused(problems)
     end
+  end
+
+  defp refused(problems) do
+    Mix.shell().error("Refused:")
+    Enum.each(problems, &Mix.shell().error("  [#{&1.code}] #{&1.message}"))
+    exit({:shutdown, 1})
   end
 end

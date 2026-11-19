@@ -509,4 +509,91 @@ defmodule SpriteProfiles.MergeTest do
       assert codes(refusals) == [:bad_name, :bad_name]
     end
   end
+
+  describe "picks by address" do
+    defp fetched(name, owner, pick, toml \\ "") do
+      %{profile!(name, toml) | qualified: "#{owner}.#{name}", pick: pick}
+    end
+
+    test "check_picks takes names and addresses, and refuses bad ones with a code" do
+      assert Merge.check_picks(["claude-code", "acme/profiles/linear@v1"]) == :ok
+
+      {:error, rs} =
+        Merge.check_picks(["acme/profiles/linear", "acme@v1", "gitlab.example/a/b@v1", "Bad"])
+
+      assert codes(rs) == [:address_needs_ref, :bad_address, :bad_address, :bad_name]
+      assert hd(rs).message =~ "acme/profiles/linear@v1 or acme/profiles/linear@main"
+    end
+
+    test "one address at two refs is a duplicate_pick" do
+      {:error, [r]} = Merge.check_picks(["acme/profiles/linear@v1", "Acme/profiles/linear@v2"])
+      assert r.code == :duplicate_pick
+      assert r.profiles == ["acme/profiles/linear@v1", "Acme/profiles/linear@v2"]
+      assert r.message =~ "(acme/profiles/linear)"
+    end
+
+    test "labels, identity and the set string use qualified names and picks" do
+      plan =
+        merge!([
+          profile!("claude-code"),
+          fetched("linear", "acme", "acme/profiles/linear@v1")
+        ])
+
+      assert plan.labels == ["profile:claude-code", "profile:acme.linear"]
+      assert plan.profiles == ["claude-code", "acme.linear"]
+      assert plan.set == "claude-code+acme/profiles/linear@v1"
+    end
+
+    test "a refusal sentence names the pick as written" do
+      [r] =
+        refusals([
+          profile!("claude-code", ~s([env]\nLINEAR_URL = "a")),
+          fetched("linear", "acme", "acme/profiles/linear@v1", ~s([env]\nLINEAR_URL = "b"))
+        ])
+
+      assert r.code == :env_collision
+      assert r.profiles == ["claude-code", "acme/profiles/linear@v1"]
+
+      assert r.message =~
+               "profiles 'claude-code' and 'acme/profiles/linear@v1' both define env LINEAR_URL"
+    end
+
+    test "connector_missing names the dotted label and the pick" do
+      plan =
+        merge!([
+          fetched(
+            "linear",
+            "acme",
+            "acme/profiles/linear@v1",
+            ~s([[connectors]]\nprovider = "linear")
+          )
+        ])
+
+      {:error, [r]} = Merge.check_connectors(plan, [])
+      assert r.profiles == ["acme/profiles/linear@v1"]
+
+      assert r.message =~
+               "profile 'acme/profiles/linear@v1' needs a linear connector that admits Sprites labelled profile:acme.linear"
+    end
+
+    test "a label longer than a Sprite takes is label_too_long" do
+      # A GitHub owner is at most 39 characters, so a real address can't reach the limit.
+      long = String.duplicate("o", 125)
+      [r] = refusals([fetched("linear", long, "o/p/linear@v1")])
+      assert r.code == :label_too_long
+      assert r.message =~ "a Sprite takes labels of up to 128"
+    end
+
+    test "skills land under the qualified name" do
+      p = %{
+        fetched("linear", "acme", "acme/p/linear@v1")
+        | skills: [%{name: "triage", source: nil, files: ["SKILL.md"]}]
+      }
+
+      plan = merge!([p])
+
+      assert [%{dest: ".claude/skills/acme.linear--triage/", profile: "acme.linear"}] =
+               plan.skills
+    end
+  end
 end

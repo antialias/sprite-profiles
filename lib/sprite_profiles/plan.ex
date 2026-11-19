@@ -4,10 +4,15 @@ defmodule SpriteProfiles.Plan do
   applied in. Built by `SpriteProfiles.Merge`; printed by `format/1`.
 
   Every merged item remembers the profile it came from, so a reader can trace each line back.
+  Profiles are identified by their qualified name (`acme.linear` for a fetched profile, the
+  name for a local one); `picks` maps each to the pick as written, which is how the printed
+  plan names them. `sources` says where each fetched profile came from.
   """
 
   @type t :: %__MODULE__{
           profiles: [String.t()],
+          picks: %{optional(String.t()) => String.t()},
+          sources: [map()],
           set: String.t(),
           privileged: boolean(),
           labels: [String.t()],
@@ -25,6 +30,8 @@ defmodule SpriteProfiles.Plan do
         }
 
   defstruct profiles: [],
+            picks: %{},
+            sources: [],
             set: "",
             privileged: false,
             labels: [],
@@ -63,6 +70,7 @@ defmodule SpriteProfiles.Plan do
       "Plan for #{plan.set}#{if plan.privileged, do: " (privileged: a person may launch it, an agent may not)", else: ""}",
       "",
       section("Apply order", apply_order(plan)),
+      if(plan.sources == [], do: [], else: section("Sources", sources(plan))),
       section("Labels", plan.labels),
       section("Connectors", connectors(plan)),
       section("Network policy", policy(plan)),
@@ -70,12 +78,33 @@ defmodule SpriteProfiles.Plan do
       section("Services", services(plan)),
       section("MCP servers", mcp(plan)),
       section("Claude settings", settings(plan.claude_settings)),
-      section("Skills", Enum.map(plan.skills, &"~/#{&1.dest}  (#{&1.profile})")),
-      section("Files", Enum.map(plan.files, &"~/#{&1.dest}  (#{&1.profile})"))
+      section("Skills", Enum.map(plan.skills, &"~/#{&1.dest}  (#{shown(plan, &1.profile)})")),
+      section("Files", Enum.map(plan.files, &"~/#{&1.dest}  (#{shown(plan, &1.profile)})"))
     ]
     |> List.flatten()
     |> Enum.join("\n")
   end
+
+  @doc """
+  The Sources lines: for each fetched profile, its publisher, repository, ref and commit,
+  and whether it runs a setup.sh. Empty for a set of local profiles.
+  """
+  @spec sources(t()) :: [String.t()]
+  def sources(%__MODULE__{sources: sources}) do
+    width = sources |> Enum.map(&String.length(&1.pick)) |> Enum.max(fn -> 0 end)
+
+    Enum.map(sources, fn s ->
+      sha = String.slice(s.sha, 0, 8)
+      ref = if s.ref =~ ~r/^[0-9a-fA-F]{40}$/, do: "commit #{sha}", else: "#{s.ref} = #{sha}"
+
+      setup =
+        if s[:setup], do: ", setup.sh (up to #{duration(s.timeout)})", else: ", no setup.sh"
+
+      "#{String.pad_trailing(s.pick, width)}  publisher #{s.owner}, repo #{s.owner}/#{s.repo}, #{ref}#{setup}"
+    end)
+  end
+
+  defp shown(plan, q), do: Map.get(plan.picks, q, q)
 
   defp section(title, []), do: ["#{title}: none", ""]
   defp section(title, lines), do: ["#{title}:", Enum.map(lines, &"  #{&1}"), ""]
@@ -85,8 +114,8 @@ defmodule SpriteProfiles.Plan do
 
     step = fn {name, i} ->
       case setup[name] do
-        nil -> "#{i}. #{name}"
-        s -> "#{i}. #{name}  (setup.sh, up to #{duration(s.timeout)})"
+        nil -> "#{i}. #{shown(plan, name)}"
+        s -> "#{i}. #{shown(plan, name)}  (setup.sh, up to #{duration(s.timeout)})"
       end
     end
 
@@ -105,7 +134,7 @@ defmodule SpriteProfiles.Plan do
 
   defp connectors(plan) do
     Enum.map(plan.connectors, fn c ->
-      "#{c.provider}  (#{Enum.join(c.profiles, ", ")}); must admit a Sprite labelled #{Enum.map_join(c.profiles, " or ", &"profile:#{&1}")}"
+      "#{c.provider}  (#{Enum.map_join(c.profiles, ", ", &shown(plan, &1))}); must admit a Sprite labelled #{Enum.map_join(c.profiles, " or ", &"profile:#{&1}")}"
     end)
   end
 
@@ -121,7 +150,9 @@ defmodule SpriteProfiles.Plan do
   defp env(plan) do
     plan.env
     |> Enum.sort()
-    |> Enum.map(fn {key, %{value: v, profile: p}} -> "#{key} = #{env_value(v)}  (#{p})" end)
+    |> Enum.map(fn {key, %{value: v, profile: p}} ->
+      "#{key} = #{env_value(v)}  (#{shown(plan, p)})"
+    end)
   end
 
   defp env_value({:secret, name}), do: "<secret #{name}, read at launch>"
@@ -131,14 +162,14 @@ defmodule SpriteProfiles.Plan do
   defp services(plan) do
     Enum.map(plan.services, fn s ->
       port = if s.http_port, do: ", http_port #{s.http_port}", else: ""
-      "#{s.name}: #{Enum.join([s.cmd | s.args], " ")}#{port}  (#{s.profile})"
+      "#{s.name}: #{Enum.join([s.cmd | s.args], " ")}#{port}  (#{shown(plan, s.profile)})"
     end)
   end
 
   defp mcp(plan) do
     Enum.map(plan.mcp_servers, fn s ->
       where = s.config["url"] || s.config["command"]
-      "#{s.name} (#{s.type}) #{where}  (#{s.profile})"
+      "#{s.name} (#{s.type}) #{where}  (#{shown(plan, s.profile)})"
     end)
   end
 

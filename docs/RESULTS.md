@@ -98,3 +98,83 @@ Not shown:
 - A tool that reads a token from its env and calls the company's own host, as many CLIs do.
   It works through the gateway only if its base URL can be changed; otherwise its profile
   stays privileged.
+
+## Profiles by address
+
+Tested on 2026-11-19 on two fresh Sprites, destroyed afterwards.
+
+**Labels.** Labels were set with `sprite config update --clear-labels --label ...` and read
+back with `sprite info`.
+
+| label | result |
+|---|---|
+| `profile:acme.linear` (with a `.`), set at create | accepted, read back as written |
+| a 64-character `profile:...` label | accepted |
+| an 80-character label | accepted |
+| a 128-character label | accepted |
+| a 129-character label | refused: `label at index 1 must be at most 128 bytes` |
+| a 200-character label | refused, the same way |
+
+So a dotted label is fine, and the limit is 128 bytes. The launcher used to stop at 63
+characters, a guess; it now takes up to 128. A published profile's label is at most 79
+characters (a GitHub owner is at most 39, a name 31), so `label_too_long` is a guard that
+real addresses don't reach.
+
+**Skills in a folder with a `.`.** Claude Code 2.1 on the Sprite was not signed in, so it
+couldn't be asked to list its skills. Its debug log counts the skills it loads, though. With
+`~/.claude/skills/acme.linear--demo/SKILL.md` beside the two skills the Sprite ships with,
+it loaded 4 user skills; with that folder moved away, 3. It counted the folder with or
+without a `name:` in the front matter. So skills keep the qualified name,
+`<owner>.<name>--<skill>`.
+
+**Task holds.** The first launch below showed one thing the design had missed: the Sprites
+Task API refuses a `.` in a task name (`task name must contain only lowercase letters,
+numbers, and dashes`). The hold for the published profile's `setup.sh` failed, quietly, and
+the script ran anyway, without a hold. The runner now writes the `.` as `--`
+(`profiled-setup-antialias--claude-code`). After the fix the hold was granted.
+
+**A locked launch.** The set was this repository's `claude-code`, fetched by address, plus
+the local `preview`:
+
+```sh
+mix profiles.lock -p antialias/sprite-profiles/profiles/claude-code@main -p preview
+mix profiles.launch --lock sprite-profiles.lock --name <a test name>
+mix profiles.plan --lock sprite-profiles.lock --offline
+```
+
+| step | time |
+|---|---:|
+| `mix profiles.lock`, empty cache (resolve, download, extract, plan) | 3.9 s |
+| `mix profiles.lock` again, commit cached (resolve only) | 3.1 s |
+| launch from the lock, second run (step times below) | 11.0 s |
+| `mix profiles.plan --lock ... --offline` | 0.4 s |
+
+For scale, a plan of local profiles takes 0.4 s, Mix's start included. The rest of a lock
+is the calls to GitHub; it was not broken down further. The launch's steps:
+
+| step | time |
+|---|---:|
+| create (labels in the request) | 0.35 s |
+| policy | 0.35 s |
+| prepare | 0.59 s |
+| env | 0.45 s |
+| `antialias.claude-code`: files, settings, MCP, setup | 2.92 s |
+| `preview`: files, service | 6.02 s (service 5.38 s) |
+| checkpoint | 0.28 s |
+| **total** | **10.97 s** |
+
+That is the same as the local `claude-code + preview` launch above (11.8 s): a launch from a
+lock makes no request to GitHub, and the cached commit is read like a local folder.
+
+On the Sprite: its labels were `profile:antialias.claude-code` and `profile:preview`; the
+skill was at `~/.claude/skills/antialias.claude-code--profiled/`, and Claude Code loaded it;
+`claude mcp list` showed `context7` connected; `~/work` was trusted; the preview service
+answered 200; the launch record held the source (pick, owner, repo, path, ref, commit). The
+plan printed the Sources section before the first API call.
+
+Offline: with the commit cached, `--offline` planned the set in 0.4 s and a dry-run launch
+passed. With an empty cache, `--offline` refused it (`not_cached`), naming the cache path.
+The tests check that a locked plan or launch makes no ref lookup.
+
+Not shown: a private repository (not supported), a tag (the live check used a branch; tags,
+annotated tags and a tag that moves are covered by tests against a stub).

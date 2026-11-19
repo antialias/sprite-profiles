@@ -104,6 +104,49 @@ MCP servers:
 set exits 1 and prints one line per refusal: a code in brackets for programs, then a
 sentence for people. `--agent` judges the set as an agent would launch it.
 
+### Use a published profile
+
+A profile doesn't have to be on your machine. Pick it by its address on GitHub, in the
+form GitHub Actions uses: `owner/repo/path@ref`. The ref is a tag, a branch or a commit,
+and it is required. This repository's own `preview`, fetched from GitHub:
+
+```sh
+mix profiles.plan -p claude-code -p antialias/sprite-profiles/profiles/preview@main
+```
+
+The plan gains a Sources section, so you see where the code comes from before it runs:
+
+```
+Sources:
+  antialias/sprite-profiles/profiles/preview@main  publisher antialias, repo antialias/sprite-profiles, main = 9da6fc08, no setup.sh
+
+Labels:
+  profile:claude-code
+  profile:antialias.preview
+```
+
+A fetched profile is named for its publisher: its label is `profile:antialias.preview`, not
+`profile:preview`. A label follows how the profile is picked, so only a repository owned by
+`antialias` can give that label, and a connector granted to it stays with it.
+
+Fetching needs no token, but only public repositories work. The repository is downloaded
+once per commit into `~/.cache/sprite-profiles/`. A branch moves, so pin the set before you
+launch it:
+
+```sh
+mix profiles.lock -p claude-code -p antialias/sprite-profiles/profiles/preview@main
+mix profiles.launch --lock sprite-profiles.lock --name demo-3
+mix profiles.plan --lock sprite-profiles.lock --offline
+```
+
+`mix profiles.lock` writes `sprite-profiles.lock`: the set, with every address pinned to a
+commit. A launch from the lock uses those commits and looks nothing up. Run
+`mix profiles.lock` again to move to the newest commits; it prints each one that changed.
+`--offline` calls nothing, and works once the commits are cached.
+
+A fetched profile's `setup.sh` runs with the Sprite's full access, like your own. Read the
+Sources section before you launch.
+
 ## Launch a Sprite
 
 You need the [`sprite` CLI](https://docs.fly.io/sprites/quickstart.md), logged in. The
@@ -120,7 +163,8 @@ The launcher prints each step's time as it goes:
 
 1. Merge the set, and refuse before any API call.
 2. If the set needs a connector, check that one in the org admits it.
-3. Create the Sprite, with a `profile:<name>` label for every pick.
+3. Create the Sprite, with a `profile:<name>` label for every pick (`profile:<owner>.<name>`
+   for a published one).
 4. Set the network policy.
 5. Apply each profile in order: files, skills, Claude settings, MCP servers, then
    `setup.sh` (holding a Sprites Task so the Sprite stays awake), then services.
@@ -207,7 +251,10 @@ name found in two folders is refused, so your profile never silently shadows an 
 - To give Sprites a new capability, add a profile rather than changing one Sprite by hand.
   The next Sprite gets it too, and the merge checks it against everything else.
 - Inside a launched Sprite, each profile's skills are at
-  `~/.claude/skills/<profile>--<skill>/`.
+  `~/.claude/skills/<profile>--<skill>/`, or `<owner>.<profile>--<skill>/` for a published
+  one.
+- Prefer launching a lock file. A lock names exact commits, so the set you checked is the
+  set you launch.
 
 Next comes an MCP server, so that an agent can list profiles and launch sets without ever
 holding the Sprites token. It will refuse privileged sets on its own; today that judgment is
@@ -255,15 +302,18 @@ everything before launch, and a conflict is a refusal. A profile's network rules
 an app's permission list: you see "reaches github.com and npm" before it runs. So the vendor
 of a tool or a connector could publish the profile for it.
 
-That needs pieces this repository doesn't have yet: versioned and signed profiles, since
-`setup.sh` runs with the Sprite's full access; dependencies between profiles; and starting a
-Sprite from a template, which only the platform can provide.
+Profiles can already be published and picked by address, pinned to a commit. What's still
+missing: signed profiles, or a list of publishers you trust, since `setup.sh` runs with the
+Sprite's full access; dependencies between profiles; and starting a Sprite from a template,
+which only the platform can provide.
 
 ## Status
 
 The profile format, the merge rules, `mix profiles.plan` and `mix profiles.launch` work
 today, and four of the five examples have been launched on real Sprites. `github` waits on a
-connector. Next come the MCP server for agents and a web catalogue for picking a set.
+connector. Profiles can be picked by address from public GitHub repositories and pinned with
+`mix profiles.lock`; a locked set mixing a local and a published profile has been launched
+on a real Sprite. Next come the MCP server for agents and a web catalogue for picking a set.
 
 - [docs/SPEC.md](docs/SPEC.md): the profile format, the merge rules and the launch sequence.
 - [docs/RESULTS.md](docs/RESULTS.md): step timings on real Sprites.

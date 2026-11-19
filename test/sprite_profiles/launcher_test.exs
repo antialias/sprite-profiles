@@ -212,6 +212,84 @@ defmodule SpriteProfiles.LauncherTest do
     end
   end
 
+  describe "a launch with a fetched profile" do
+    setup ctx do
+      SpriteProfiles.GitHubFixtures.stub_acme()
+      {sprites, log} = FakeSprites.start()
+      test_pid = self()
+
+      {:ok, record} =
+        Launcher.launch(
+          ["preview", "acme/profiles/linear@v1"],
+          opts(ctx, sprites,
+            cache_dir: Path.join(ctx.tmp_dir, "cache"),
+            on_resolved: &send(test_pid, {:resolved, &1})
+          )
+        )
+
+      %{record: record, log: log}
+    end
+
+    test "labels it by its qualified name", %{log: log} do
+      assert [{:create, ["demo-1", ["profile:preview", "profile:acme.linear"]]} | _] =
+               FakeSprites.calls(log)
+    end
+
+    test "names its skills folder, setup script, Task hold and PROFILED_PROFILE by it",
+         %{log: log} do
+      {tar, _} = writes(log)["/tmp/profiled-acme.linear.tar"]
+      {:ok, names} = :erl_tar.table({:binary, tar})
+      assert Enum.map(names, &to_string/1) == [".claude/skills/acme.linear--triage/SKILL.md"]
+
+      assert {"#!/usr/bin/env bash\necho linear\n", 0o755} =
+               writes(log)["/home/sprite/.config/profiled/setup/acme.linear.sh"]
+
+      run = Enum.find(scripts(log), &(&1 =~ "run-setup.sh\" "))
+      assert run =~ ~s('acme.linear' '600' 'preview+acme/profiles/linear@v1')
+      # The runner derives the hold and PROFILED_PROFILE from its first argument.
+      assert Launcher.runner_script() =~ ~s(PROFILED_PROFILE="$profile")
+    end
+
+    @tag :tmp_dir
+    test "the runner's Task hold has no '.', which Sprites refuse in a task name", ctx do
+      runner = Path.join(ctx.tmp_dir, "run.sh")
+      # Run the runner's own name line in bash, with a stand-in for its arguments.
+      [line] = Regex.run(~r/^task=.*$/m, Launcher.runner_script())
+      File.write!(runner, "profile=acme.linear\n#{line}\nprintf %s \"$task\"")
+      assert {"profiled-setup-acme--linear", 0} = System.cmd("bash", [runner])
+    end
+
+    test "checkpoints with the picks as written", %{log: log} do
+      assert {:checkpoint, ["demo-1", "profiled: preview+acme/profiles/linear@v1"]} =
+               List.last(FakeSprites.calls(log))
+    end
+
+    test "keeps the sources in the launch record, and shows them before any call",
+         %{record: record} do
+      assert record.sources == [
+               %{
+                 pick: "acme/profiles/linear@v1",
+                 owner: "acme",
+                 repo: "profiles",
+                 path: "linear",
+                 ref: "v1",
+                 sha: SpriteProfiles.GitHubFixtures.sha1()
+               }
+             ]
+
+      saved = record.record_path |> File.read!() |> Jason.decode!()
+      assert [%{"sha" => _, "pick" => "acme/profiles/linear@v1"}] = saved["sources"]
+      assert_received {:resolved, plan}
+      assert [line] = SpriteProfiles.Plan.sources(plan)
+      assert line =~ "publisher acme"
+    end
+
+    test "the default Sprite name joins short names" do
+      plan = %SpriteProfiles.Plan{profiles: ["claude-code", "acme.linear"]}
+      assert Launcher.default_name(plan) =~ ~r/^claude-code-linear-[0-9a-f]{4}$/
+    end
+  end
+
   describe "privileged profiles" do
     test "are applied after the checkpoint, and their secret never reaches the record", ctx do
       secrets = Path.join(ctx.tmp_dir, "secrets")

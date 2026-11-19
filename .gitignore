@@ -40,3 +40,6 @@ npm-debug.log
 .env
 .env.*
 secrets/
+
+# A set pinned by `mix profiles.lock` (README, "Use a published profile").
+/sprite-profiles.lock

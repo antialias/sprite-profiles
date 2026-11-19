@@ -20,3 +20,7 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Profiles by address: every GitHub request in a test goes to a Req.Test stub, never out.
+config :sprite_profiles, SpriteProfiles.GitHub,
+  req_options: [plug: {Req.Test, SpriteProfiles.GitHub}]

@@ -4,8 +4,11 @@ defmodule SpriteProfiles.Launcher do
 
   The sequence (see `docs/SPEC.md`, "Launching"):
 
-    1. Resolve the set and refuse locally, before any API call: bad picks, invalid
-       profiles, merge refusals, a missing secret, a bad Sprite name.
+    1. Resolve the set and refuse locally, before any API call: bad picks, addresses that
+       cannot be resolved or fetched, invalid profiles, merge refusals, a missing secret, a
+       bad Sprite name. A fetched profile is named by its qualified name (`acme.linear`)
+       in its label, its skills folder and `PROFILED_PROFILE`; its Task hold, whose name
+       may not hold a `.`, is `profiled-setup-acme--linear`.
     2. Check connectors against the org's (only when the set needs one).
     3. Create the Sprite with its labels, and verify them; set them again if they did not
        stick.
@@ -21,7 +24,16 @@ defmodule SpriteProfiles.Launcher do
   All Sprite access goes through a `SpriteProfiles.Sprites` handle, so tests use a stub.
   """
 
-  alias SpriteProfiles.{ClaudeSettings, Merge, Plan, Profile, ProfilePath, Refusal, Sprites}
+  alias SpriteProfiles.{
+    ClaudeSettings,
+    Merge,
+    Plan,
+    Profile,
+    ProfilePath,
+    Refusal,
+    Resolver,
+    Sprites
+  }
 
   @gateway "https://api.sprites.dev/v1/gateway"
   @sprite_name_re ~r/^[a-z][a-z0-9-]{1,62}$/
@@ -34,16 +46,18 @@ defmodule SpriteProfiles.Launcher do
   @setup_dir ".config/profiled/setup"
 
   @doc """
-  Resolves `names` into `{:ok, plan, profiles, secrets}`, or `{:error, refusals}`. Local
-  only: reads the profiles folder and the secrets folder, calls nothing.
+  Resolves `names` (picks: names or addresses) into `{:ok, plan, profiles, secrets}`, or
+  `{:error, refusals}`. Calls no Sprites API: reads the profiles folder and the secrets
+  folder, and fetches from GitHub what an address needs and the cache lacks.
 
   Options: `:dirs` (the profile search path; see `SpriteProfiles.ProfilePath`), `:dir` (one
   folder, instead of `:dirs`), `:caller` (`:person` or `:agent`), `:secrets_dir`,
-  `:name` (checked when given).
+  `:name` (checked when given), and those of `SpriteProfiles.Resolver.find/3` (`:pins`
+  from a lock, `:offline`, `:cache_dir`, `:req_options`).
   """
   def resolve(names, opts \\ []) do
     with :ok <- Merge.check_picks(names),
-         {:ok, profiles} <- ProfilePath.find(names, dirs(opts)),
+         {:ok, profiles} <- Resolver.find(names, dirs(opts), opts),
          {:ok, plan} <- Merge.merge(profiles, caller: Keyword.get(opts, :caller, :person)),
          :ok <- check_name(opts[:name]),
          {:ok, secrets} <- read_secrets(plan, Keyword.get(opts, :secrets_dir, @secrets_dir)) do
@@ -62,18 +76,20 @@ defmodule SpriteProfiles.Launcher do
     * `:destroy_on_failure` - destroy the Sprite when a step after its creation fails
     * `:state_dir` - where launch records go (default `#{@state_dir}`)
     * `:on_step` - `fun(step)`, called as each step finishes, for live output
+    * `:on_resolved` - `fun(plan)`, called once the set is resolved, before any API call
   """
   def launch(names, opts) do
     sprites = Keyword.fetch!(opts, :sprites)
 
     with {:ok, plan, profiles, secrets} <- resolve(names, opts) do
       name = opts[:name] || default_name(plan)
+      Keyword.get(opts, :on_resolved, fn _ -> :ok end).(plan)
 
       state = %{
         sprites: sprites,
         name: name,
         plan: plan,
-        profiles: Map.new(profiles, &{&1.name, &1}),
+        profiles: Map.new(profiles, &{&1.qualified, &1}),
         secrets: secrets,
         connector_env: %{},
         home: nil,
@@ -428,9 +444,17 @@ defmodule SpriteProfiles.Launcher do
   @doc "Where secrets are read from unless `:secrets_dir` says otherwise."
   def default_secrets_dir, do: @secrets_dir
 
-  @doc "The default Sprite name for a plan: the picks joined by '-', then 4 hex digits."
+  @doc """
+  The default Sprite name for a plan: the profiles' short names joined by '-', then 4 hex
+  digits.
+  """
   def default_name(%Plan{profiles: names}) do
-    base = names |> Enum.join("-") |> String.slice(0, 40) |> String.trim_trailing("-")
+    base =
+      names
+      |> Enum.map_join("-", &(&1 |> String.split(".") |> List.last()))
+      |> String.slice(0, 40)
+      |> String.trim_trailing("-")
+
     base <> "-" <> Base.encode16(:crypto.strong_rand_bytes(2), case: :lower)
   end
 
@@ -459,7 +483,7 @@ defmodule SpriteProfiles.Launcher do
       for s <- p.skills, rel <- s.files do
         %{
           source: Path.join(s.source, rel),
-          dest: Path.join([".claude/skills", "#{p.name}--#{s.name}", rel]),
+          dest: Path.join([".claude/skills", Merge.skill_folder(p, s), rel]),
           executable: false
         }
       end
@@ -541,7 +565,8 @@ defmodule SpriteProfiles.Launcher do
     # usage: run-setup.sh PROFILE TIMEOUT_SECONDS SET
     set -u
     profile="$1"; timeout_s="$2"; set_name="$3"
-    task="profiled-setup-$profile"
+    # Task names take only a-z, 0-9 and '-', so a qualified name's '.' becomes '--'.
+    task="profiled-setup-${profile//./--}"
     [ -f "$HOME/.config/profiled/env.sh" ] && . "$HOME/.config/profiled/env.sh"
     export PROFILED_PROFILE="$profile" PROFILED_SET="$set_name"
 
@@ -588,6 +613,8 @@ defmodule SpriteProfiles.Launcher do
       name: state.name,
       set: state.plan.set,
       profiles: state.plan.profiles,
+      sources:
+        Enum.map(state.plan.sources, &Map.take(&1, [:pick, :owner, :repo, :path, :ref, :sha])),
       before_checkpoint: state.plan.before_checkpoint,
       after_checkpoint: state.plan.after_checkpoint,
       privileged: state.plan.privileged,

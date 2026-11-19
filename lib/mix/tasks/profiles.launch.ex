@@ -9,10 +9,15 @@ defmodule Mix.Tasks.Profiles.Launch do
       mix profiles.launch --profile claude-code --profile preview --name demo-1
       mix profiles.launch -p claude-code -p github --dry-run
       mix profiles.launch -p claude-code -p anthropic-key --destroy-on-failure
+      mix profiles.launch --lock sprite-profiles.lock --name demo-3
 
   Options:
 
-    * `--profile`, `-p` - a profile to pick; repeat it, in the order to apply them
+    * `--profile`, `-p` - a profile to pick, by name or by address
+      (`owner/repo[/path]@ref`); repeat it, in the order to apply them
+    * `--lock` - a lock file written by `mix profiles.lock`, instead of `--profile`; the
+      launch uses its commits and resolves no ref
+    * `--offline` - fetch nothing: every address must be pinned and cached
     * `--name` - the Sprite's name (default: the picks joined by '-', then 4 hex digits)
     * `--dry-run` - resolve the set and print the plan; create nothing
     * `--destroy-on-failure` - destroy the Sprite if a step after its creation fails
@@ -29,7 +34,7 @@ defmodule Mix.Tasks.Profiles.Launch do
 
   use Mix.Task
 
-  alias SpriteProfiles.{Launcher, Plan, ProfilePath, Sprites}
+  alias SpriteProfiles.{Launcher, Plan, ProfilePath, SetArgs, Sprites}
 
   @switches [
     profile: :keep,
@@ -38,7 +43,9 @@ defmodule Mix.Tasks.Profiles.Launch do
     destroy_on_failure: :boolean,
     dir: :keep,
     secrets_dir: :string,
-    adapter: :string
+    adapter: :string,
+    lock: :string,
+    offline: :boolean
   ]
   @aliases [p: :profile]
 
@@ -50,18 +57,27 @@ defmodule Mix.Tasks.Profiles.Launch do
 
     case OptionParser.parse(argv, strict: @switches, aliases: @aliases) do
       {opts, [], []} ->
-        names = Keyword.get_values(opts, :profile)
-        if opts[:dry_run], do: dry_run(names, opts), else: launch(names, opts)
+        case SetArgs.picks(opts) do
+          {:ok, names, set_opts} ->
+            opts = opts ++ [set_opts: set_opts]
+            if opts[:dry_run], do: dry_run(names, opts), else: launch(names, opts)
+
+          {:usage, message} ->
+            usage_error(message, "")
+
+          {:error, problems} ->
+            refused(problems)
+        end
 
       {_, args, invalid} ->
         usage_error(Enum.join(args ++ Enum.map(invalid, &elem(&1, 0)), " "))
     end
   end
 
-  defp usage_error(extra) do
+  defp usage_error(extra, prefix \\ "not understood: ") do
     Mix.shell().error(
-      "usage: mix profiles.launch --profile NAME [--profile NAME ...] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]" <>
-        if(extra == "", do: "", else: "\nnot understood: " <> extra)
+      "usage: mix profiles.launch (--profile PICK [--profile PICK ...] | --lock FILE) [--offline] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]" <>
+        if(extra == "", do: "", else: "\n" <> prefix <> extra)
     )
 
     exit({:shutdown, 2})
@@ -86,7 +102,8 @@ defmodule Mix.Tasks.Profiles.Launch do
         [
           sprites: sprites,
           destroy_on_failure: opts[:destroy_on_failure] || false,
-          on_step: &print_step/1
+          on_step: &print_step/1,
+          on_resolved: &print_sources/1
         ]
 
     Mix.shell().info("Launching #{Enum.join(names, " + ")}")
@@ -118,7 +135,14 @@ defmodule Mix.Tasks.Profiles.Launch do
       secrets_dir: Keyword.get(opts, :secrets_dir, Launcher.default_secrets_dir()),
       name: opts[:name],
       caller: :person
-    ]
+    ] ++ Keyword.get(opts, :set_opts, [])
+  end
+
+  defp print_sources(plan) do
+    case Plan.sources(plan) do
+      [] -> :ok
+      lines -> Mix.shell().info(Enum.join(["Sources:" | Enum.map(lines, &"  #{&1}")], "\n"))
+    end
   end
 
   defp sprites("cli"), do: Sprites.new(Sprites.Cli, [])
@@ -147,7 +171,7 @@ defmodule Mix.Tasks.Profiles.Launch do
     mark = if s.outcome == :ok, do: " ", else: "!"
 
     Mix.shell().info(
-      "#{mark} #{String.pad_trailing(step_name(s), 26)} #{seconds(s.ms)}  #{one_line(s.detail)}"
+      "#{mark} #{String.pad_trailing(step_name(s), 34)} #{seconds(s.ms)}  #{one_line(s.detail)}"
     )
   end
 

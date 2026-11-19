@@ -7,54 +7,65 @@ defmodule SpriteProfiles.Merge do
   refusal found is returned, not only the first, so a person can fix them in one pass.
   """
 
-  alias SpriteProfiles.{ClaudeSettings, Plan, Profile, Refusal}
+  alias SpriteProfiles.{Address, ClaudeSettings, Plan, Profile, Refusal}
 
   @max_picks 8
+
+  # Fly refuses a label over 128 bytes (measured; see docs/RESULTS.md).
+  @max_label 128
+
+  @doc "The longest label a Sprite accepts, in bytes."
+  def max_label, do: @max_label
 
   @doc "The most profiles one set may hold."
   def max_picks, do: @max_picks
 
   @doc """
-  Checks the picked names alone (count, repeats, spelling), before any profile is read.
+  Checks the picks alone (count, repeats, spelling), before any profile is read. A pick is a
+  profile name or an address (`owner/repo[/path]@ref`). The same address at two refs is a
+  repeat.
   """
   @spec check_picks([String.t()]) :: :ok | {:error, [Refusal.t()]}
   def check_picks([]) do
     {:error, [Refusal.new(:no_profiles, [], "a set needs at least one profile; pick one.")]}
   end
 
-  def check_picks(names) do
+  def check_picks(picks) do
     bad =
-      names
-      |> Enum.reject(&Profile.valid_name?/1)
+      picks
       |> Enum.uniq()
-      |> Enum.map(fn name ->
-        Refusal.new(
-          :bad_name,
-          [],
-          "#{inspect(name)} is not a profile name; names are 2-31 characters of a-z, 0-9 and '-', starting with a letter."
-        )
-      end)
+      |> Enum.flat_map(&pick_problem/1)
 
     dups =
-      names
-      |> Enum.frequencies()
-      |> Enum.filter(fn {_, n} -> n > 1 end)
-      |> Enum.sort()
-      |> Enum.map(fn {name, n} ->
-        Refusal.new(
-          :duplicate_pick,
-          [name],
-          "profile '#{name}' is picked #{n} times; pick each profile once."
-        )
+      picks
+      |> Enum.group_by(&pick_identity/1)
+      |> Enum.filter(fn {_, list} -> length(list) > 1 end)
+      |> Enum.sort_by(fn {_, [first | _]} -> Enum.find_index(picks, &(&1 == first)) end)
+      |> Enum.map(fn {id, list} ->
+        case Enum.uniq(list) do
+          [one] ->
+            Refusal.new(
+              :duplicate_pick,
+              [one],
+              "profile '#{one}' is picked #{length(list)} times; pick each profile once."
+            )
+
+          several ->
+            Refusal.new(
+              :duplicate_pick,
+              several,
+              "#{Enum.map_join(several, " and ", &"'#{&1}'")} are one profile (#{id}) picked at different refs; pick it once."
+            )
+        end
       end)
 
     count =
-      if length(names) > @max_picks do
+      if length(picks) > @max_picks do
         [
           Refusal.new(
             :too_many_profiles,
             [],
-            "a set holds at most #{@max_picks} profiles and this one has #{length(names)}; drop some."
+            "a set holds at most #{@max_picks} profiles and this one has #{length(picks)}; drop some."
           )
         ]
       else
@@ -67,6 +78,56 @@ defmodule SpriteProfiles.Merge do
     end
   end
 
+  defp pick_problem(pick) do
+    cond do
+      Address.address?(pick) ->
+        case Address.parse(pick) do
+          {:ok, _} ->
+            []
+
+          {:error, :address_needs_ref} ->
+            [
+              Refusal.new(
+                :address_needs_ref,
+                [pick],
+                "#{inspect(pick)} has no ref; add a tag, a branch or a commit, like #{pick}@v1 or #{pick}@main."
+              )
+            ]
+
+          {:error, :bad_address} ->
+            [
+              Refusal.new(
+                :bad_address,
+                [],
+                "#{inspect(pick)} is not an address; an address is owner/repo[/path]@ref, as GitHub Actions writes it."
+              )
+            ]
+        end
+
+      Profile.valid_name?(pick) ->
+        []
+
+      true ->
+        [
+          Refusal.new(
+            :bad_name,
+            [],
+            "#{inspect(pick)} is not a profile name; names are 2-31 characters of a-z, 0-9 and '-', starting with a letter."
+          )
+        ]
+    end
+  end
+
+  # Two picks are the same profile when they name it the same way, ignoring the ref.
+  defp pick_identity(pick) do
+    with true <- Address.address?(pick),
+         {:ok, address} <- Address.parse(pick) do
+      Address.identity(address)
+    else
+      _ -> pick
+    end
+  end
+
   @doc """
   Merges `profiles` in pick order.
 
@@ -75,9 +136,12 @@ defmodule SpriteProfiles.Merge do
   """
   @spec merge([Profile.t()], keyword()) :: {:ok, Plan.t()} | {:error, [Refusal.t()]}
   def merge(profiles, opts \\ []) do
-    names = Enum.map(profiles, & &1.name)
+    profiles = Enum.map(profiles, &identify/1)
+    picks = Enum.map(profiles, & &1.pick)
 
-    with :ok <- check_picks(names) do
+    with :ok <- check_picks(picks),
+         :ok <- check_collisions(profiles),
+         :ok <- check_labels(profiles) do
       env = merge_env(profiles)
       provided = Map.keys(env.value)
 
@@ -103,13 +167,53 @@ defmodule SpriteProfiles.Merge do
     end
   end
 
+  # Profiles built by hand (in tests, say) may lack a qualified name or a pick.
+  defp identify(%Profile{} = p),
+    do: %{p | qualified: p.qualified || p.name, pick: p.pick || p.qualified || p.name}
+
+  defp check_collisions(profiles) do
+    refusals =
+      profiles
+      |> Enum.group_by(& &1.qualified)
+      |> Enum.filter(fn {_, list} -> length(list) > 1 end)
+      |> Enum.sort_by(fn {q, _} -> first_index(profiles, q) end)
+      |> Enum.map(fn {q, list} ->
+        picks = Enum.map(list, & &1.pick)
+
+        Refusal.new(
+          :profile_collision,
+          picks,
+          "#{Enum.map_join(picks, " and ", &"'#{&1}'")} are both the profile #{q}, and a profile has one label (profile:#{q}); keep one of them."
+        )
+      end)
+
+    if refusals == [], do: :ok, else: {:error, refusals}
+  end
+
+  defp check_labels(profiles) do
+    refusals =
+      for p <- profiles,
+          label <- ["profile:#{p.qualified}" | p.labels],
+          byte_size(label) > @max_label do
+        Refusal.new(
+          :label_too_long,
+          [p.pick],
+          "profile '#{p.pick}' gives the label #{label}, which is #{byte_size(label)} bytes; a Sprite takes labels of up to #{@max_label}, so shorten the name."
+        )
+      end
+
+    if refusals == [], do: :ok, else: {:error, refusals}
+  end
+
   defp build_plan(profiles, env, services, mcp, settings, {files, skills}) do
-    names = Enum.map(profiles, & &1.name)
+    names = Enum.map(profiles, & &1.qualified)
     {before, after_} = Enum.split_with(profiles, &(&1.checkpoint and not &1.privileged))
 
     %Plan{
       profiles: names,
-      set: Enum.join(names, "+"),
+      picks: Map.new(profiles, &{&1.qualified, &1.pick}),
+      sources: sources(profiles),
+      set: Enum.map_join(profiles, "+", & &1.pick),
       privileged: Enum.any?(profiles, & &1.privileged),
       labels: labels(profiles),
       env: env,
@@ -120,21 +224,40 @@ defmodule SpriteProfiles.Merge do
       claude_settings: settings,
       files: files,
       skills: skills,
-      before_checkpoint: Enum.map(before, & &1.name),
-      after_checkpoint: Enum.map(after_, & &1.name),
+      before_checkpoint: Enum.map(before, & &1.qualified),
+      after_checkpoint: Enum.map(after_, & &1.qualified),
       setup:
         for(
           p <- before ++ after_,
           p.setup,
-          do: %{profile: p.name, script: p.setup, timeout: p.timeout}
+          do: %{profile: p.qualified, script: p.setup, timeout: p.timeout}
         )
     }
+  end
+
+  defp sources(profiles) do
+    for %Profile{source: %{} = src} = p <- profiles do
+      Map.merge(src, %{
+        pick: p.pick,
+        profile: p.qualified,
+        setup: p.setup != nil,
+        timeout: p.timeout
+      })
+    end
+  end
+
+  # How sentences name a profile: its pick as written.
+  defp shown(profiles, q) do
+    case Enum.find(profiles, &(&1.qualified == q)) do
+      nil -> q
+      p -> p.pick
+    end
   end
 
   ## labels, policy, connectors: unions that never refuse
 
   defp labels(profiles) do
-    (Enum.map(profiles, &"profile:#{&1.name}") ++ Enum.flat_map(profiles, & &1.labels))
+    (Enum.map(profiles, &"profile:#{&1.qualified}") ++ Enum.flat_map(profiles, & &1.labels))
     |> Enum.uniq()
   end
 
@@ -156,13 +279,13 @@ defmodule SpriteProfiles.Merge do
 
   defp connectors(profiles) do
     profiles
-    |> Enum.flat_map(fn p -> Enum.map(p.connectors, &{&1, p.name}) end)
+    |> Enum.flat_map(fn p -> Enum.map(p.connectors, &{&1, p.qualified}) end)
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
     |> Enum.map(fn {provider, owners} -> %{provider: provider, profiles: owners} end)
     |> Enum.sort_by(fn c -> first_index(profiles, hd(c.profiles)) end)
   end
 
-  defp first_index(profiles, name), do: Enum.find_index(profiles, &(&1.name == name))
+  defp first_index(profiles, q), do: Enum.find_index(profiles, &(&1.qualified == q))
 
   ## env: a key two profiles define is a refusal, even with the same value
 
@@ -179,13 +302,13 @@ defmodule SpriteProfiles.Merge do
                  [
                    Refusal.new(
                      :env_collision,
-                     [first, p.name],
-                     "profiles '#{first}' and '#{p.name}' both define env #{key}; a set will not pick one silently, so remove it from one of them."
+                     [shown(profiles, first), p.pick],
+                     "profiles '#{shown(profiles, first)}' and '#{p.pick}' both define env #{key}; a set will not pick one silently, so remove it from one of them."
                    )
                  ]}
 
             _ ->
-              {Map.put(acc, key, %{value: v, profile: p.name}), refusals}
+              {Map.put(acc, key, %{value: v, profile: p.qualified}), refusals}
           end
         end)
       end)
@@ -196,7 +319,7 @@ defmodule SpriteProfiles.Merge do
   ## services: same name refuses; at most one http_port across the set
 
   defp merge_services(profiles) do
-    all = for p <- profiles, s <- p.services, do: Map.put(s, :profile, p.name)
+    all = for p <- profiles, s <- p.services, do: Map.put(s, :profile, p.qualified)
 
     name_refusals =
       all
@@ -204,10 +327,12 @@ defmodule SpriteProfiles.Merge do
       |> Enum.filter(fn {_, list} -> length(list) > 1 end)
       |> Enum.sort_by(fn {_, [s | _]} -> first_index(profiles, s.profile) end)
       |> Enum.map(fn {name, [a, b | _]} ->
+        {a, b} = {shown(profiles, a.profile), shown(profiles, b.profile)}
+
         Refusal.new(
           :service_collision,
-          [a.profile, b.profile],
-          "profiles '#{a.profile}' and '#{b.profile}' both define service '#{name}'; a set will not pick one silently, so rename it in one of them."
+          [a, b],
+          "profiles '#{a}' and '#{b}' both define service '#{name}'; a set will not pick one silently, so rename it in one of them."
         )
       end)
 
@@ -217,8 +342,8 @@ defmodule SpriteProfiles.Merge do
           [
             Refusal.new(
               :http_port_conflict,
-              [a.profile, b.profile],
-              "profiles '#{a.profile}' and '#{b.profile}' both give a service an http_port ('#{a.name}' on #{a.http_port}, '#{b.name}' on #{b.http_port}); a Sprite routes its URL to one service, so drop http_port from one of them."
+              [shown(profiles, a.profile), shown(profiles, b.profile)],
+              "profiles '#{shown(profiles, a.profile)}' and '#{shown(profiles, b.profile)}' both give a service an http_port ('#{a.name}' on #{a.http_port}, '#{b.name}' on #{b.http_port}); a Sprite routes its URL to one service, so drop http_port from one of them."
             )
           ]
 
@@ -232,7 +357,7 @@ defmodule SpriteProfiles.Merge do
   ## MCP servers: same name refuses; a server that would need a sign-in refuses
 
   defp merge_mcp(profiles, provided_env) do
-    all = for p <- profiles, s <- p.mcp_servers, do: Map.put(s, :profile, p.name)
+    all = for p <- profiles, s <- p.mcp_servers, do: Map.put(s, :profile, p.qualified)
 
     collisions =
       all
@@ -240,14 +365,17 @@ defmodule SpriteProfiles.Merge do
       |> Enum.filter(fn {_, list} -> length(list) > 1 end)
       |> Enum.sort_by(fn {_, [s | _]} -> first_index(profiles, s.profile) end)
       |> Enum.map(fn {name, [a, b | _]} ->
+        {a, b} = {shown(profiles, a.profile), shown(profiles, b.profile)}
+
         Refusal.new(
           :mcp_server_collision,
-          [a.profile, b.profile],
-          "profiles '#{a.profile}' and '#{b.profile}' both define MCP server '#{name}'; a set will not pick one silently, so remove it from one of them."
+          [a, b],
+          "profiles '#{a}' and '#{b}' both define MCP server '#{name}'; a set will not pick one silently, so remove it from one of them."
         )
       end)
 
-    logins = Enum.flat_map(all, &needs_login(&1, provided_env))
+    logins =
+      Enum.flat_map(all, &needs_login(%{&1 | profile: shown(profiles, &1.profile)}, provided_env))
 
     %{value: all, refusals: collisions ++ logins}
   end
@@ -290,7 +418,7 @@ defmodule SpriteProfiles.Merge do
         |> Enum.reduce(acc, fn {path, v}, {merged, owners, refusals} ->
           case conflict(merged, owners, path, v) do
             :ok ->
-              {put_in_path(merged, path, v), Map.put_new(owners, path, p.name), refusals}
+              {put_in_path(merged, path, v), Map.put_new(owners, path, p.pick), refusals}
 
             :combine ->
               combined = ClaudeSettings.combine(get_path(merged, path), v)
@@ -307,8 +435,8 @@ defmodule SpriteProfiles.Merge do
                  [
                    Refusal.new(
                      :settings_collision,
-                     [first, p.name],
-                     "profiles '#{first}' and '#{p.name}' both set Claude setting #{Enum.join(path, ".")}, to different values; a set will not pick one silently, so remove it from one of them."
+                     [first, p.pick],
+                     "profiles '#{first}' and '#{p.pick}' both set Claude setting #{Enum.join(path, ".")}, to different values; a set will not pick one silently, so remove it from one of them."
                    )
                  ]}
           end
@@ -360,7 +488,7 @@ defmodule SpriteProfiles.Merge do
           Enum.map(p.files, fn f ->
             %{
               kind: :file,
-              profile: p.name,
+              profile: p.qualified,
               source: f.source,
               dest: f.path,
               executable: f.executable
@@ -372,9 +500,9 @@ defmodule SpriteProfiles.Merge do
             Enum.map(s.files, fn rel ->
               %{
                 kind: :skill,
-                profile: p.name,
+                profile: p.qualified,
                 source: s.source && Path.join(s.source, rel),
-                dest: Path.join([".claude/skills", "#{p.name}--#{s.name}", rel]),
+                dest: Path.join([".claude/skills", skill_folder(p, s), rel]),
                 executable: false
               }
             end)
@@ -383,16 +511,16 @@ defmodule SpriteProfiles.Merge do
         files ++ skills
       end)
 
-    refusals = file_collisions(entries)
+    refusals = file_collisions(entries, profiles)
 
     skills =
       for p <- profiles,
           s <- p.skills,
           do: %{
-            profile: p.name,
+            profile: p.qualified,
             skill: s.name,
             source: s.source,
-            dest: ".claude/skills/#{p.name}--#{s.name}/"
+            dest: ".claude/skills/#{skill_folder(p, s)}/"
           }
 
     files =
@@ -403,7 +531,14 @@ defmodule SpriteProfiles.Merge do
     %{value: {files, skills}, refusals: refusals}
   end
 
-  defp file_collisions(entries) do
+  @doc """
+  The folder under `~/.claude/skills/` a profile's skill lands in:
+  `<qualified name>--<skill>`. Claude Code loads skills from folders with a `.` in their
+  name (checked on a Sprite; see docs/RESULTS.md).
+  """
+  def skill_folder(%Profile{} = p, %{name: skill}), do: "#{p.qualified || p.name}--#{skill}"
+
+  defp file_collisions(entries, profiles) do
     {_, refusals} =
       Enum.reduce(entries, {%{}, []}, fn e, {seen, refusals} ->
         {claims, clashes_with} = path_keys(e.dest)
@@ -424,8 +559,8 @@ defmodule SpriteProfiles.Merge do
              [
                Refusal.new(
                  :file_collision,
-                 [clash, e.profile],
-                 "profiles '#{clash}' and '#{e.profile}' both push ~/#{e.dest}; a set will not pick one silently, so remove it from one of them."
+                 [shown(profiles, clash), shown(profiles, e.profile)],
+                 "profiles '#{shown(profiles, clash)}' and '#{shown(profiles, e.profile)}' both push ~/#{e.dest}; a set will not pick one silently, so remove it from one of them."
                )
              ]}
         else
@@ -456,8 +591,8 @@ defmodule SpriteProfiles.Merge do
       |> Enum.map(fn p ->
         Refusal.new(
           :not_for_agents,
-          [p.name],
-          "profile '#{p.name}' is privileged; an agent may not launch a set that holds it, so a person must launch this set."
+          [p.pick],
+          "profile '#{p.pick}' is privileged; an agent may not launch a set that holds it, so a person must launch this set."
         )
       end)
     else
@@ -493,7 +628,8 @@ defmodule SpriteProfiles.Merge do
             end
 
           labels = Enum.map_join(owners, " or ", &"profile:#{&1}")
-          names = Enum.map_join(owners, " and ", &"'#{&1}'")
+          picks = Enum.map(owners, &Map.get(plan.picks, &1, &1))
+          names = Enum.map_join(picks, " and ", &"'#{&1}'")
 
           what =
             if length(owners) > 1, do: "profiles #{names} need", else: "profile #{names} needs"
@@ -501,7 +637,7 @@ defmodule SpriteProfiles.Merge do
           [
             Refusal.new(
               :connector_missing,
-              owners,
+              picks,
               "#{what} a #{provider} connector that admits Sprites labelled #{labels}, and the org has none; #{where} and add that label to its access policy."
             )
           ]

@@ -43,27 +43,33 @@ defmodule SpriteProfiles.ProfilePath do
   @spec find([String.t()], [Path.t()]) ::
           {:ok, [Profile.t()]} | {:error, [Refusal.t() | Profile.Error.t()]}
   def find(names, dirs) do
-    missing =
-      for dir <- dirs, not File.dir?(dir) do
-        Refusal.new(
-          :profile_dir_missing,
-          [],
-          "the profile folder #{dir} does not exist; fix the --dir or #{@env} entry."
-        )
-      end
-
     results = Enum.map(names, &find_one(&1, dirs))
-    errors = missing ++ Enum.flat_map(results, &errors/1)
+    errors = missing_dirs(dirs) ++ Enum.flat_map(results, &errors/1)
 
     if errors == [],
       do: {:ok, Enum.map(results, fn {:ok, p} -> p end)},
       else: {:error, errors}
   end
 
+  @doc "A `profile_dir_missing` refusal for each folder on the path that does not exist."
+  @spec missing_dirs([Path.t()]) :: [Refusal.t()]
+  def missing_dirs(dirs) do
+    for dir <- dirs, not File.dir?(dir) do
+      Refusal.new(
+        :profile_dir_missing,
+        [],
+        "the profile folder #{dir} does not exist; fix the --dir or #{@env} entry."
+      )
+    end
+  end
+
   defp errors({:error, e}), do: e
   defp errors(_), do: []
 
-  defp find_one(name, dirs) do
+  @doc "Finds and loads one profile by name along `dirs`."
+  @spec find_one(String.t(), [Path.t()]) ::
+          {:ok, Profile.t()} | {:error, [Refusal.t() | Profile.Error.t()]}
+  def find_one(name, dirs) do
     case for(dir <- dirs, path = Path.join(dir, name), File.dir?(path), do: path) do
       [path] ->
         Profile.load(path)
