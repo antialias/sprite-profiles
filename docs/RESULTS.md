@@ -58,3 +58,43 @@ new Sprite pays the full setup again. Starting a new Sprite from a checkpoint wo
 heavy part of a launch into a restore, and leave only the light, per-person profiles
 (credentials, connectors, skills) to apply. Those are the ones that must stay out of
 checkpoints anyway, which is what the post-checkpoint rule for privileged profiles is for.
+
+## A company's credential, without a privileged profile
+
+Tested on 2026-11-19 on two fresh Sprites, with Fly's custom API connector, which wraps any
+token-authenticated HTTP API and can be created through the API. The "company" was an echo
+service (httpbin.org) and the token a dummy value. The connector's access policy admitted
+Sprites labelled `profile:spike-echo`, allowed the paths `/anything/*` and `/bearer`, and
+blocked `/anything/blocked/*`.
+
+| from | call | answer |
+|---|---|---|
+| a Sprite carrying the label | `/anything/hello` | 200; the echo showed `Authorization: Bearer <the dummy token>`, added by the gateway |
+| | `/anything/blocked/x` | 403 `endpoint is blocked by policy` |
+| | `/get` | 403 `endpoint is not in allowed list` |
+| a Sprite without the label | every path | 403 `sprite is missing required labels: profile:spike-echo`; the gateway's list showed it no connector |
+
+Neither Sprite's environment held the token.
+
+A second custom API connector pointed at a remote MCP server (Context7, with the dummy token
+in a header it ignores). In the labelled Sprite, `claude mcp add --transport http` with the
+gateway URL, then `claude mcp list`, reported the server `✔ Connected`; its reply streamed
+through the gateway as `text/event-stream`.
+
+So a company's API, and its remote MCP server, can reach a Sprite through a connector granted
+to that company's profile label, with the paths it may call listed in the connector's policy.
+A profile for a company then holds no secret, need not be privileged, and an agent may launch
+it. The format already covers the Sprite's side: env `{ from = "connector", ... }` gives the
+gateway URL, and an MCP server's `url` may use `${NAME}`. What it lacks is a way to name a
+custom API connector, since every one of them has the provider `custom_api`.
+
+Not shown:
+
+- An MCP server that keeps a session (`Mcp-Session-Id`); Context7 does not.
+- An MCP server that accepts only an OAuth sign-in. A custom API connector holds a token and
+  can't run a sign-in. Fly's catalogue has OAuth connectors for some companies (Slack,
+  GitHub, Notion and Neon among about fifty); whether those reach a company's MCP server was
+  not tested.
+- A tool that reads a token from its env and calls the company's own host, as many CLIs do.
+  It works through the gateway only if its base URL can be changed; otherwise its profile
+  stays privileged.
