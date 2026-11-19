@@ -10,6 +10,11 @@ the merge rules; `README.md` says what this is for people.
 - The gate, before every commit: `mix format --check-formatted`, `mix compile --warnings-as-errors`,
   `mix test`.
 - A change to a merge rule changes `docs/SPEC.md` and adds a test in the same commit.
+- The `sprite-profiles` binary: `MIX_ENV=prod BURRITO_TARGET=macos_arm64 mix release` writes
+  `burrito_out/sprite_profiles_macos_arm64` (needs zig 0.16.0 and xz; see `releases/0` in
+  `mix.exs`). `SpriteProfiles.CLI` is its entry point and runs from `Application.start/2`, so
+  nothing it calls may wait on the application controller. `.github/workflows/release.yml`
+  builds it for a `v*` tag.
 
 ## Public repo
 

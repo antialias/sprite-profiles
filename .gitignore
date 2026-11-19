@@ -43,3 +43,6 @@ secrets/
 
 # A set pinned by `mix profiles.lock` (README, "Use a published profile").
 /sprite-profiles.lock
+
+# Binaries built by Burrito (`MIX_ENV=prod mix release`).
+/burrito_out/
