@@ -188,9 +188,9 @@ defmodule SpriteProfiles.GitTest do
                )
     end
 
-    test "a folder the commit lacks is profile_dir_missing", ctx do
+    test "a folder the commit lacks is profile_not_found", ctx do
       for path <- ["profiles/nope", "README.md"] do
-        assert {:error, %Refusal{code: :profile_dir_missing, message: msg}} =
+        assert {:error, %Refusal{code: :profile_not_found, message: msg}} =
                  Git.fetch(ctx.url, ctx.c1, path, dest(ctx, "nope"), ctx.opts)
 
         assert msg =~ path

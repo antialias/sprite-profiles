@@ -519,7 +519,7 @@ defmodule SpriteProfiles.MergeTest do
       assert Merge.check_picks(["claude-code", "acme/profiles/linear@v1"]) == :ok
 
       {:error, rs} =
-        Merge.check_picks(["acme/profiles/linear", "acme@v1", "gitlab.example/a/b@v1", "Bad"])
+        Merge.check_picks(["acme/profiles/linear", "acme@v1", "git.example.com/a@v1", "Bad"])
 
       assert codes(rs) == [:address_needs_ref, :bad_address, :bad_address, :bad_name]
       assert hd(rs).message =~ "acme/profiles/linear@v1 or acme/profiles/linear@main"

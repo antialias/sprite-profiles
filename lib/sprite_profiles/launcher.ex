@@ -578,8 +578,9 @@ defmodule SpriteProfiles.Launcher do
     # usage: run-setup.sh PROFILE TIMEOUT_SECONDS SET
     set -u
     profile="$1"; timeout_s="$2"; set_name="$3"
-    # Task names take only a-z, 0-9 and '-', so a qualified name's '.' becomes '--'.
-    task="profiled-setup-${profile//./--}"
+    # Task names take only a-z, 0-9 and '-', so a qualified name's '.' becomes '--', and
+    # anything else outside them (a '_' in another host's namespace) becomes '-'.
+    task="${profile//./--}"; task="profiled-setup-${task//[^a-z0-9-]/-}"
     [ -f "$HOME/.config/profiled/env.sh" ] && . "$HOME/.config/profiled/env.sh"
     export PROFILED_PROFILE="$profile" PROFILED_SET="$set_name"
 

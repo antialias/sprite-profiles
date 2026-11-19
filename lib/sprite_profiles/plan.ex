@@ -93,8 +93,8 @@ defmodule SpriteProfiles.Plan do
   end
 
   @doc """
-  The Sources lines: for each fetched profile, its publisher, repository, ref and commit,
-  and whether it runs a setup.sh. Empty for a set of local profiles. A name pick also says
+  The Sources lines: for each fetched profile, its publisher (with its host, off GitHub),
+  repository, ref and commit, and whether it runs a setup.sh. Empty for a set of local profiles. A name pick also says
   which folder its name was found in, and shows its version as `@owner/name@1.0.0 = sha`.
   """
   @spec sources(t()) :: [String.t()]
@@ -105,9 +105,15 @@ defmodule SpriteProfiles.Plan do
       setup =
         if s[:setup], do: ", setup.sh (up to #{duration(s.timeout)})", else: ", no setup.sh"
 
-      "#{String.pad_trailing(s.pick, width)}  publisher #{s.owner}, repo #{s.owner}/#{s.repo}#{where(s)}#{setup}"
+      "#{String.pad_trailing(s.pick, width)}  publisher #{publisher(s)}, repo #{publisher(s)}/#{s.repo}#{where(s)}#{setup}"
     end)
   end
+
+  # On a host other than GitHub, the publisher is named with its host.
+  defp publisher(%{host: host, owner: owner}) when host not in [nil, "github.com"],
+    do: "#{host}/#{owner}"
+
+  defp publisher(s), do: s.owner
 
   defp where(s) do
     sha = String.slice(s.sha, 0, 8)

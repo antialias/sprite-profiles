@@ -48,17 +48,19 @@ A pick may also be an **address** on GitHub: `owner/repo[/path]@ref`, the form G
 Actions uses. `owner/repo` is the repository, `path` (optional) the folder in it that
 holds `profile.toml`, and `ref` a tag, a branch or a 40-hex commit. The ref is required
 (`address_needs_ref`). The publisher is the owner; a tag is a version. Owner and repository
-are compared case-insensitively; a first segment holding a `.` is refused (`bad_address`),
-kept for a host prefix later.
+are compared case-insensitively. A first segment holding a `.` or a `:` is a host (see
+"Profiles on other git hosts"); `github.com/owner/repo@ref` is the same as
+`owner/repo@ref`.
 
 The ref is resolved to a commit (`ref_not_found`, `ref_ambiguous` when a tag and a branch
 share the name, `repo_not_found`), the repository at that commit is fetched once into
 `~/.cache/sprite-profiles/github/<owner>/<repo>/<sha>/` (`fetch_failed`,
 `archive_too_large` over 32 MB, `bad_archive`; `not_cached` under `--offline`), and the
 profile is read from `<path>` there by the rules above. With a path, the last segment must
-equal `name`; at a repository root the repository's name is free. Only public repositories
-can be fetched. `SPRITE_PROFILES_CACHE` (or `XDG_CACHE_HOME`) moves the cache; a commit never
-changes, so nothing in it is ever invalidated.
+equal `name`; at a repository root the repository's name is free. A public repository
+needs no `git`; a private one, an archive over 32 MB and an archive holding a symlink are
+fetched with `git` instead, as on other hosts. `SPRITE_PROFILES_CACHE` (or `XDG_CACHE_HOME`)
+moves the cache; a commit never changes, so nothing in it is ever invalidated.
 
 A fetched profile's **qualified name** is `<owner>.<name>` (owner lowercased). It is the
 profile's identity in a set, its label is `profile:<owner>.<name>`, its skills land in
@@ -112,11 +114,15 @@ A name's line also names the folder it was found in and shows its version:
 @acme/linear@1  publisher acme, repo acme/sprite-profiles, folder linear, @acme/linear@1.1.0 = c3c3c3c3, no setup.sh
 ```
 
+On another git host the publisher and repository carry the host:
+`publisher git.example.com/team, repo git.example.com/team/profiles`.
+
 ### Profiles by name
 
 A pick starting with `@` is a **name**: `@owner/name[@version]`, a published profile found
 by convention, the way `gh` finds extensions. Nothing is hosted: a published profile is a
-public GitHub repository laid out as below, and its versions are git tags.
+git repository laid out as below, on GitHub or another git host, and its versions are git
+tags.
 
 | pick | kind |
 |---|---|
@@ -127,8 +133,8 @@ public GitHub repository laid out as below, and its versions are git tags.
 A leading `@` makes a name; otherwise a `/` or an `@` makes an address; otherwise the pick
 is local. In a name, `owner` is a GitHub owner (compared case-insensitively) and `name` a
 profile name. A first segment holding a `.` or a `:` is a host, `@HOST/NS/NAME[@V]`:
-`github.com` is the same as no host, and any other host is refused for now
-(`host_not_supported`). A malformed name is `bad_name`.
+`github.com` is the same as no host, and any other host is found with git (see "Profiles on
+other git hosts"). A malformed name is `bad_name`.
 
 **Where a name is found.** For `@owner/name`, the first of these that exists wins; one
 owner controls all of them, so the order is never a guess:
@@ -152,7 +158,8 @@ owner controls all of them, so the order is never a guess:
 
 Nothing matching is refused (`name_not_found`), naming the places looked in. Finding a name
 reads refs (from `info/refs`, as for an address) and single files (from
-`raw.githubusercontent.com`), never GitHub's API and never an archive; then the commit is
+`raw.githubusercontent.com`; with git for a private repository), never GitHub's API and
+never an archive; then the commit is
 fetched and read exactly like the address it stands for, and the profile must declare the
 name it was picked by (`name_mismatch`).
 
@@ -190,6 +197,70 @@ name    = "linear"
 
 The version must match the pick and the tag in `ref`. Locking again reports a new version
 as `@acme/linear@1: 1.0.0 → 1.1.0 (new version)`.
+
+### Profiles on other git hosts
+
+Names and addresses work on any git host: Gitea, Forgejo, GitLab, Codeberg, a server of
+your own. A first segment holding a `.` or a `:` is the host, `host` or `host:port`:
+
+| pick | kind |
+|---|---|
+| `@git.example.com/team/linear`, `…@1`, `…@main` | a name on another host |
+| `@git.example.com/group/sub/linear` | a name in a namespace of several segments |
+| `git.example.com/team/profiles/linear@v1` | an address on another host |
+| `git.example.com/group/sub/profiles.git/linear@v1` | an address in a namespace of several segments |
+
+- **A name**, `@HOST/NS/NAME[@V]`, is found as on GitHub, in the same three places on that
+  host and in that namespace (`NS/sprite-profile-NAME`, `NS/sprite-profiles`, its
+  `links.toml`), with the same versions. `NS` is one or more segments of
+  `[A-Za-z0-9._-]`, so a GitLab group's subgroups work.
+- **An address**, `HOST/OWNER/REPO[/path]@ref`, has a one-segment owner. A namespace of
+  several segments marks where the repository ends with `.git`, as Go does:
+  `HOST/group/sub/repo.git/path@ref`. A `.git` ending is dropped wherever it is written.
+- **The repository** is `https://HOST/NS…/REPO.git`, read with `git`, never with the host's
+  API: `git ls-remote` for refs; for content, a shallow, blob-less fetch of the one commit
+  (`--depth 1 --filter=blob:none`) with a sparse checkout of the profile's folder; and
+  single files (`profile.toml` of a collection's folder, `links.toml`) from the same kind of
+  fetch, with no checkout.
+- **Credentials** are whatever the user's git has (a credential helper, an SSH key).
+  sprite-profiles never asks for, reads or stores them. Git runs with
+  `GIT_TERMINAL_PROMPT=0`, so a repository git cannot open is refused at once
+  (`repo_not_found`) rather than waiting at a prompt. No `git` on `PATH` is `git_missing`.
+- **Checks** apply to the profile's own folder, not the rest of the repository, which is
+  never checked out: a symlink or a submodule in it is `bad_archive`, more than 32 MB of files
+  `archive_too_large`, a folder the commit lacks `profile_not_found`.
+- **The cache** is `~/.cache/sprite-profiles/<host>/<ns…>/<repo>/<sha>/`, one entry per
+  folder fetched, so a later pick of another folder of the same commit fetches again.
+
+GitHub takes the same path when its own is closed: a repository `info/refs` does not show
+(a private one) is listed with `git ls-remote`, and its files are read with git; codeload's
+404, an archive over 32 MB and an archive holding a symlink are fetched with git, so a
+private repository or a monorepo works through the user's git. Without `git` the archive's
+own refusal stands.
+
+**Identity.** On another host the qualified name is `<host>.<ns…>.<name>`, lowercased, with
+a port's `:` written as `-`: `@git.example.com:3000/group/sub/linear` is
+`git.example.com-3000.group.sub.linear`, its label `profile:git.example.com-3000.group.sub.linear`.
+A GitHub qualified name has exactly one `.`, so the two never collide, and a name and an
+address of one profile share it (`profile_collision` when a set holds both).
+`label_too_long` (128 bytes) guards these labels too. A setup.sh's Task hold writes `.` as
+`--` and anything else outside `a-z`, `0-9` and `-` as `-`.
+
+**Locks.** An address or a name on another host is locked with its `host`, which makes the
+lock `format = 3`; a GitHub address leaves `host` out, as before. A locked launch reads no
+refs and no `links.toml`, and runs no `git` for a commit already in the cache.
+
+```toml
+[[picks]]
+pick  = "git.example.com/group/sub/profiles.git/linear@main"
+host  = "git.example.com"
+owner = "group/sub"
+repo  = "profiles"
+path  = "linear"
+ref   = "main"
+sha   = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
+name  = "linear"
+```
 
 ### profile.toml
 
@@ -345,7 +416,7 @@ union where that is safe, refusal where two profiles disagree. Nothing is picked
 | `setup.sh` | runs in apply order, each with its own `timeout`, with `PROFILED_PROFILE`, `PROFILED_SET` and the merged env exported; a failure stops the launch | |
 | `privileged` | a set holding a privileged profile is privileged: a person may launch it, an agent may not | `not_for_agents` |
 | order | pick order, except that privileged profiles (and any with `checkpoint = false`) are applied after the `profiled` checkpoint, so credentials are never in a checkpoint. The plan prints the final order | |
-| bounds | 1 to 8 picks, none repeated (an address repeated at another ref, or a name at another version, counts), every pick a valid name, address or published name; no two with one qualified name | `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `bad_address`, `address_needs_ref`, `host_not_supported`, `profile_collision` |
+| bounds | 1 to 8 picks, none repeated (an address repeated at another ref, or a name at another version, counts), every pick a valid name, address or published name; no two with one qualified name | `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `bad_address`, `address_needs_ref`, `profile_collision` |
 | names | each published name is found by convention and its version chosen before merging (see Profiles by name) | `name_not_found`, `name_ambiguous`, `bad_links`, `no_versions`, `version_not_found` |
 
 A pick that names no folder on the search path is refused with `profile_not_found`, one found

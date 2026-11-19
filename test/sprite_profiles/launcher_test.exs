@@ -259,6 +259,15 @@ defmodule SpriteProfiles.LauncherTest do
       [line] = Regex.run(~r/^task=.*$/m, Launcher.runner_script())
       File.write!(runner, "profile=acme.linear\n#{line}\nprintf %s \"$task\"")
       assert {"profiled-setup-acme--linear", 0} = System.cmd("bash", [runner])
+
+      # Another host's qualified name, with a port and a '_' in its namespace.
+      File.write!(
+        runner,
+        "profile=git.example.com-3000.my_team.linear\n#{line}\nprintf %s \"$task\""
+      )
+
+      assert {"profiled-setup-git--example--com-3000--my-team--linear", 0} =
+               System.cmd("bash", [runner])
     end
 
     test "checkpoints with the picks as written", %{log: log} do

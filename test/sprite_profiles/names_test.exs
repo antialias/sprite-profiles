@@ -184,12 +184,11 @@ defmodule SpriteProfiles.NamesTest do
       assert {:error, [r]} = Resolver.find(["@acme/both"], [], opts)
       assert r.code == :name_ambiguous
 
+      # Another host is asked through git; the test config points it at nothing.
       assert {:error, [r]} = Resolver.find(["@git.example.com/team/linear"], [], opts)
-      assert r.code == :host_not_supported
-
-      assert {:error, [r]} = Resolver.find(["@git.example.com/group/sub/linear@1"], [], opts)
-      assert r.code == :host_not_supported
-      assert {:error, %{code: :host_not_supported}} = resolve("@git.example.com/group/sub/linear")
+      assert r.code == :name_not_found
+      assert r.message =~ "git.example.com has no repository git.example.com/team/"
+      assert r.profiles == ["@git.example.com/team/linear"]
     end
 
     test "a name and the equivalent address are one profile", %{opts: opts} do

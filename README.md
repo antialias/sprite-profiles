@@ -131,8 +131,10 @@ A fetched profile is named for its publisher: its label is `profile:antialias.pr
 `profile:preview`. A label follows how the profile is picked, so only a repository owned by
 `antialias` can give that label, and a connector granted to it stays with it.
 
-Fetching needs no token, but only public repositories work. The repository is downloaded
-once per commit into `~/.cache/sprite-profiles/`. A branch moves, so pin the set before you
+Fetching a public GitHub repository needs no token and no `git`. A private one, a very large
+one, or one on another git host (`git.example.com/team/profiles/linear@v1`) is fetched with
+`git`, through the credentials your git already has. What is fetched is kept once per commit
+in `~/.cache/sprite-profiles/`. A branch moves, so pin the set before you
 launch it:
 
 ```sh

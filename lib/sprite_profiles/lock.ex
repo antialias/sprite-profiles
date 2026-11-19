@@ -40,6 +40,21 @@ defmodule SpriteProfiles.Lock do
   name    = "linear"
   ```
 
+  An address or a name on a host other than GitHub also holds its `host`, and makes the
+  lock `format = 3`:
+
+  ```toml
+  [[picks]]
+  pick  = "git.example.com/team/profiles/linear@v1"
+  host  = "git.example.com"
+  owner = "team"
+  repo  = "profiles"
+  path  = "linear"
+  ref   = "v1"
+  sha   = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
+  name  = "linear"
+  ```
+
   A locked launch uses the commit and never resolves the ref, the name or the version.
   Locking again resolves every pick afresh; `diff/2` says which commits and versions
   moved. A lock that cannot be read, misses a field or has a newer `format` is refused
@@ -90,24 +105,31 @@ defmodule SpriteProfiles.Lock do
         }
 
       %Profile{source: src, pick: pick, name: name} ->
-        %{
-          pick: pick,
-          owner: src.owner,
-          repo: src.repo,
-          path: src.path,
-          ref: src.ref,
-          sha: src.sha,
-          name: name
-        }
+        with_host(
+          %{
+            pick: pick,
+            owner: src.owner,
+            repo: src.repo,
+            path: src.path,
+            ref: src.ref,
+            sha: src.sha,
+            name: name
+          },
+          src[:host]
+        )
     end)
   end
+
+  # An address records its host only off GitHub.
+  defp with_host(entry, host) when host in [nil, "github.com"], do: entry
+  defp with_host(entry, host), do: Map.put(entry, :host, host)
 
   @doc "The lock file's text for `entries` and the given `inputs` (`%{name => value}`)."
   @spec encode([entry()], DateTime.t(), %{optional(String.t()) => String.t()}) :: String.t()
   def encode(entries, at \\ DateTime.utc_now(), inputs \\ %{}) do
     format =
       cond do
-        Enum.any?(entries, &(Pick.kind(&1.pick) == :name)) -> 3
+        Enum.any?(entries, &(Pick.kind(&1.pick) == :name or Map.has_key?(&1, :host))) -> 3
         inputs != %{} -> 2
         true -> 1
       end
@@ -263,26 +285,30 @@ defmodule SpriteProfiles.Lock do
 
   defp entry(_, _), do: {:error, "it has no `pick` string"}
 
+  # An address on GitHub may leave out its host; one elsewhere names it.
   defp address_entry(pick, e) do
     if Enum.all?(@address_fields, &is_binary(e[&1])) do
       with {:ok, a} <- Address.parse(pick),
-           true <- e["host"] in [nil, Pick.github()],
+           true <- e["host"] == a.host or (e["host"] == nil and Address.github?(a)),
            true <-
              {a.owner, a.repo, a.path, a.ref} == {e["owner"], e["repo"], e["path"], e["ref"]},
            true <- sha?(e["sha"]),
            true <- Profile.valid_name?(e["name"]) do
         {:ok,
-         %{
-           pick: pick,
-           owner: a.owner,
-           repo: a.repo,
-           path: a.path,
-           ref: a.ref,
-           sha: e["sha"],
-           name: e["name"]
-         }}
+         with_host(
+           %{
+             pick: pick,
+             owner: a.owner,
+             repo: a.repo,
+             path: a.path,
+             ref: a.ref,
+             sha: e["sha"],
+             name: e["name"]
+           },
+           a.host
+         )}
       else
-        _ -> {:error, "#{pick} does not agree with its owner, repo, path, ref, sha or name"}
+        _ -> {:error, "#{pick} does not agree with its host, owner, repo, path, ref, sha or name"}
       end
     else
       {:error, "#{pick} needs #{Enum.join(@address_fields, ", ")}"}
@@ -299,7 +325,7 @@ defmodule SpriteProfiles.Lock do
 
       true ->
         with {:ok, p} <- Pick.parse(pick),
-             true <- e["host"] == p.host and Pick.supported?(p),
+             true <- e["host"] == p.host,
              true <- {e["owner"], e["name"]} == {Pick.ns(p), p.name},
              true <- where_ok?(e["repo"], e["path"]),
              true <- sha?(e["sha"]),

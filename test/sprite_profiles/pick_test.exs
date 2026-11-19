@@ -46,12 +46,11 @@ defmodule SpriteProfiles.PickTest do
     assert Pick.base(c) == "@acme/linear"
   end
 
-  test "another host parses, with a port and a namespace of several segments, but is not supported" do
+  test "another host parses, with a port and a namespace of several segments" do
     assert {:ok, p} = Pick.parse("@git.example.com:3000/Team/Sub/linear@1")
     assert p.host == "git.example.com:3000"
     assert p.ns == ["team", "sub"]
     assert p.name == "linear"
-    refute Pick.supported?(p)
     assert Pick.base(p) == "@git.example.com:3000/team/sub/linear"
     assert {:ok, %Pick{ns: ["team"]}} = Pick.parse("@localhost:8080/team/linear")
   end
@@ -102,12 +101,18 @@ defmodule SpriteProfiles.PickTest do
       assert Merge.check_picks(["@acme/linear@1", "acme/sprite-profile-linear@v1.0.0"]) == :ok
     end
 
-    test "a malformed name is bad_name, another host is host_not_supported" do
+    test "a malformed name is bad_name; another host is a name like any other" do
       assert codes(Merge.check_picks(["@acme"])) == [:bad_name]
-      assert {:error, [r]} = Merge.check_picks(["@git.example.com/team/linear@1"])
-      assert r.code == :host_not_supported
-      assert r.message =~ "git.example.com"
-      assert r.profiles == ["@git.example.com/team/linear@1"]
+      assert Merge.check_picks(["@git.example.com/team/linear@1"]) == :ok
+      assert Merge.check_picks(["@git.example.com/group/sub/linear", "@acme/linear"]) == :ok
+
+      assert {:error, [r]} =
+               Merge.check_picks([
+                 "@git.example.com/team/linear@1",
+                 "@GIT.example.com/Team/linear"
+               ])
+
+      assert r.code == :duplicate_pick
     end
   end
 end

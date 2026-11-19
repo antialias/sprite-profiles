@@ -106,7 +106,7 @@ defmodule SpriteProfiles.Merge do
           Refusal.new(
             :bad_address,
             [],
-            "#{inspect(pick)} is not an address; an address is owner/repo[/path]@ref, as GitHub Actions writes it."
+            "#{inspect(pick)} is not an address; an address is owner/repo[/path]@ref, as GitHub Actions writes it, or HOST/owner/repo[/path]@ref on another git host (a namespace of several segments ends its repository with .git: HOST/group/sub/repo.git/path@ref)."
           )
         ]
     end
@@ -114,15 +114,15 @@ defmodule SpriteProfiles.Merge do
 
   defp name_problem(pick) do
     case Pick.parse(pick) do
-      {:ok, p} ->
-        if Pick.supported?(p), do: [], else: [SpriteProfiles.Names.host_not_supported(p, pick)]
+      {:ok, _} ->
+        []
 
       {:error, :bad_name} ->
         [
           Refusal.new(
             :bad_name,
             [],
-            "#{inspect(pick)} is not a published name; a name is @owner/name, optionally with a version (@owner/name@1) or a ref (@owner/name@main)."
+            "#{inspect(pick)} is not a published name; a name is @owner/name, or @HOST/owner/name on another git host, optionally with a version (@owner/name@1) or a ref (@owner/name@main)."
           )
         ]
     end

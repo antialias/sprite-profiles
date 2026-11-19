@@ -10,10 +10,10 @@ defmodule SpriteProfiles.Refusal do
   `@acme/linear@1`).
 
   Codes: `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `bad_address`,
-  `address_needs_ref`, `host_not_supported`, `profile_not_found`, `profile_ambiguous`,
-  `profile_dir_missing`; names `name_not_found`, `name_ambiguous`, `bad_links`,
-  `no_versions`, `version_not_found`; fetching `repo_not_found`, `ref_not_found`, `ref_ambiguous`, `fetch_failed`, `not_cached`,
-  `archive_too_large`, `bad_archive`; `bad_lock`; `profile_collision`, `label_too_long`,
+  `address_needs_ref`, `profile_not_found`, `profile_ambiguous`, `profile_dir_missing`;
+  names `name_not_found`, `name_ambiguous`, `bad_links`, `no_versions`,
+  `version_not_found`; fetching `repo_not_found`, `ref_not_found`, `ref_ambiguous`,
+  `fetch_failed`, `not_cached`, `archive_too_large`, `bad_archive`, `git_missing`; `bad_lock`; `profile_collision`, `label_too_long`,
   `env_collision`, `service_collision`, `http_port_conflict`,
   `mcp_server_collision`, `mcp_needs_login`, `settings_collision`, `file_collision`,
   `connector_missing`, `not_for_agents`; inputs `input_collision`, `input_missing`,

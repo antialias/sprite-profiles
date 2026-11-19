@@ -13,11 +13,7 @@ defmodule SpriteProfiles.Pick do
   alphabet; on another host it is one or more segments of `[A-Za-z0-9._-]`. `NAME` uses
   the profile name alphabet. `V` is a version prefix (`1`, `1.2`, `1.2.3`) or, written any
   other way, a ref (a branch, a tag or a 40-hex commit, which is a ref even when all its
-  digits are decimal). The namespace and host are kept
-  lowercase.
-
-  Only GitHub resolves names for now: a pick naming another host parses, and
-  `supported?/1` says no (`host_not_supported`).
+  digits are decimal). The namespace and host are kept lowercase.
   """
 
   alias SpriteProfiles.Profile
@@ -57,8 +53,7 @@ defmodule SpriteProfiles.Pick do
     do: if(String.contains?(pick, ["/", "@"]), do: :address, else: :local)
 
   @doc """
-  Parses a name pick. Returns `{:ok, pick}` or `{:error, :bad_name}`. A host other than
-  GitHub parses; `supported?/1` is the check.
+  Parses a name pick. Returns `{:ok, pick}` or `{:error, :bad_name}`.
   """
   @spec parse(String.t()) :: {:ok, t()} | {:error, :bad_name}
   def parse("@" <> rest) do
@@ -128,9 +123,6 @@ defmodule SpriteProfiles.Pick do
         {:error, :bad_name}
     end
   end
-
-  @doc "True when names on the pick's host can be resolved (GitHub only, for now)."
-  def supported?(%__MODULE__{host: host}), do: host == @github
 
   @doc "The namespace as written in a pick: its segments joined by `/`."
   def ns(%__MODULE__{ns: ns}), do: Enum.join(ns, "/")

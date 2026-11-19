@@ -17,11 +17,16 @@ defmodule SpriteProfiles.GitHub do
   commit. The root is `SPRITE_PROFILES_CACHE`, else `$XDG_CACHE_HOME/sprite-profiles`, else
   `~/.cache/sprite-profiles`. A partial download never lands there.
 
+  This module serves public repositories only. A private repository (unauthenticated
+  `info/refs` and codeload answer 401 or 404), an archive over 32 MB, and an archive holding
+  a symlink are fetched with git instead; `SpriteProfiles.Host` decides that, and `fetch/3`
+  with `fallback: true` says when.
+
   Options for all: `:pick` (the pick as written, for sentences), `:offline` (refuse
   anything that would call out, `not_cached`), `:cache_dir` (the root), `:req_options`
   (merged into the `Req` request; tests pass a `Req.Test` plug), `:github_url`,
-  `:codeload_url` and `:raw_url`. The application env
-  `config :sprite_profiles, SpriteProfiles.GitHub, req_options: [...]` is merged first.
+  `:codeload_url`, `:raw_url` and `:max_archive` (bytes; tests lower it). The application
+  env `config :sprite_profiles, SpriteProfiles.GitHub, req_options: [...]` is merged first.
   """
 
   alias SpriteProfiles.{Address, Refusal}
@@ -135,7 +140,7 @@ defmodule SpriteProfiles.GitHub do
       :repo_not_found,
       address,
       opts,
-      "names the repository #{Address.repo_slug(address)}, which GitHub does not show (#{status}); check the owner and name. Only public repositories can be fetched, and a private one looks the same."
+      "names the repository #{Address.repo_slug(address)}, which GitHub does not show (#{status}) and git could not open; check the owner and name. A private repository is fetched with git, through git's own credentials for github.com (a credential helper): sprite-profiles never asks for them."
     )
   end
 
@@ -214,8 +219,13 @@ defmodule SpriteProfiles.GitHub do
   @doc """
   Makes sure the repository of `address` at `sha` is in the cache, and returns
   `{:ok, dir}`. A cached commit makes no request.
+
+  With `fallback: true`, what git can still fetch is returned as `{:fallback, refusal}`
+  instead of `{:error, refusal}`: codeload's 404 (a private repository, or no such
+  commit), an archive over the limit, and an archive whose only fault is a symlink.
   """
-  @spec fetch(Address.t(), String.t(), keyword()) :: {:ok, Path.t()} | {:error, Refusal.t()}
+  @spec fetch(Address.t(), String.t(), keyword()) ::
+          {:ok, Path.t()} | {:error, Refusal.t()} | {:fallback, Refusal.t()}
   def fetch(%Address{} = address, sha, opts \\ []) do
     dest = cache_path(address, sha, opts)
 
@@ -240,9 +250,11 @@ defmodule SpriteProfiles.GitHub do
   defp download(address, sha, dest, opts) do
     url = "#{opts[:codeload_url] || @codeload_url}/#{Address.repo_slug(address)}/tar.gz/#{sha}"
 
+    max = opts[:max_archive] || @max_archive
+
     case get(url, opts) do
-      {:ok, %{status: 200, body: body}} when byte_size(body) > @max_archive ->
-        {:error, too_large(address, byte_size(body), opts)}
+      {:ok, %{status: 200, body: body}} when byte_size(body) > max ->
+        fallback(too_large(address, byte_size(body), max, opts), opts)
 
       {:ok, %{status: 200, body: body}} ->
         with :ok <- check_archive(body, address, opts) do
@@ -250,51 +262,71 @@ defmodule SpriteProfiles.GitHub do
         end
 
       {:ok, %{status: 404}} ->
-        {:error,
-         refusal(
-           :ref_not_found,
-           address,
-           opts,
-           "is pinned to commit #{sha}, which #{Address.repo_slug(address)} does not have; check the commit."
-         )}
+        fallback(
+          refusal(
+            :ref_not_found,
+            address,
+            opts,
+            "is pinned to commit #{sha}, which #{Address.repo_slug(address)} does not have; check the commit."
+          ),
+          opts
+        )
 
       other ->
         {:error, fetch_failed(address, url, other, opts)}
     end
   end
 
-  defp too_large(address, size, opts) do
+  defp fallback(r, opts), do: if(opts[:fallback], do: {:fallback, r}, else: {:error, r})
+
+  defp too_large(address, size, max, opts) do
     refusal(
       :archive_too_large,
       address,
       opts,
-      "comes from #{Address.repo_slug(address)}, whose archive is #{div(size, 1024 * 1024)} MB; the most fetched is #{div(@max_archive, 1024 * 1024)} MB, so keep profiles in a small repository."
+      "comes from #{Address.repo_slug(address)}, whose archive is #{mb(size)}; the most fetched is #{mb(max)}, so keep profiles in a small repository."
     )
   end
+
+  defp mb(bytes) when bytes >= 1024 * 1024, do: "#{div(bytes, 1024 * 1024)} MB"
+  defp mb(bytes), do: "#{bytes} bytes"
 
   @doc """
   Checks a `.tar.gz` before extracting it: one top-level folder; regular files and folders
   only (GitHub's `pax_global_header` is allowed and skipped); no absolute path and no `..`.
-  Returns `:ok` or `{:error, refusal}`.
+  Returns `:ok` or `{:error, refusal}`; with `fallback: true`, an archive whose only fault
+  is a symlink is `{:fallback, refusal}`, since git checks only the profile's folder.
   """
   def check_archive(body, address, opts \\ []) do
     case :erl_tar.table({:binary, body}, [:compressed, :verbose]) do
       {:ok, entries} ->
         entries = Enum.reject(entries, &(elem(&1, 0) == ~c"pax_global_header"))
 
-        bad =
-          Enum.find_value(entries, fn entry ->
+        problems =
+          Enum.flat_map(entries, fn entry ->
             name = entry |> elem(0) |> List.to_string()
             type = elem(entry, 1)
             parts = String.split(name, "/", trim: true)
 
             cond do
-              String.starts_with?(name, "/") -> "the absolute path #{name}"
-              ".." in parts -> "the path #{name}, which climbs out with .."
-              type not in [:regular, :directory] -> "#{name}, a #{type} rather than a file"
-              true -> nil
+              String.starts_with?(name, "/") ->
+                [{:hard, "the absolute path #{name}"}]
+
+              ".." in parts ->
+                [{:hard, "the path #{name}, which climbs out with .."}]
+
+              type == :symlink ->
+                [{:link, "#{name}, a symlink rather than a file"}]
+
+              type not in [:regular, :directory] ->
+                [{:hard, "#{name}, a #{type} rather than a file"}]
+
+              true ->
+                []
             end
           end)
+
+        bad = Enum.find(problems, &(elem(&1, 0) == :hard)) || List.first(problems)
 
         tops =
           entries
@@ -302,8 +334,11 @@ defmodule SpriteProfiles.GitHub do
           |> Enum.uniq()
 
         cond do
+          match?({:link, _}, bad) ->
+            fallback(bad_archive(address, "holds #{elem(bad, 1)}", opts), opts)
+
           bad ->
-            {:error, bad_archive(address, "holds #{bad}", opts)}
+            {:error, bad_archive(address, "holds #{elem(bad, 1)}", opts)}
 
           length(tops) != 1 ->
             {:error,

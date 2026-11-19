@@ -21,11 +21,18 @@ defmodule SpriteProfiles.Names do
   branch, a tag or a 40-hex commit); no `@` is the newest version (`no_versions` when
   there is none).
 
+  On GitHub `NS` is one owner; on another host (`@HOST/NS/NAME`) it may be several
+  segments, a GitLab group and its subgroups. Every repository looked in is on the pick's
+  host, in the same namespace.
+
   Resolution reads refs and single files only, never the hosting API and never an
-  archive; `SpriteProfiles.Host` says where they come from.
+  archive; `SpriteProfiles.Host` says where they come from (on GitHub, `info/refs` and
+  `raw.githubusercontent.com`, or git for a private repository; elsewhere, git).
   """
 
   alias SpriteProfiles.{Address, GitHub, Host, Pick, Refusal}
+
+  @github "github.com"
 
   @collection "sprite-profiles"
 
@@ -50,16 +57,14 @@ defmodule SpriteProfiles.Names do
 
   @doc """
   Resolves a parsed name pick. `pick` is the pick as written, for sentences. Options are
-  `SpriteProfiles.GitHub`'s; `:offline` refuses at once (`not_cached`).
+  `SpriteProfiles.GitHub`'s and `SpriteProfiles.Git`'s; `:offline` refuses at once
+  (`not_cached`).
   """
   @spec resolve(Pick.t(), String.t(), keyword()) :: {:ok, resolved()} | {:error, Refusal.t()}
   def resolve(%Pick{} = p, pick, opts \\ []) do
     opts = Keyword.put(opts, :pick, pick)
 
     cond do
-      not Pick.supported?(p) ->
-        {:error, host_not_supported(p, pick)}
-
       opts[:offline] ->
         {:error,
          refusal(
@@ -69,11 +74,10 @@ defmodule SpriteProfiles.Names do
          )}
 
       true ->
-        # On GitHub the namespace is one owner.
-        [ns] = p.ns
+        ns = Pick.ns(p)
 
-        case Host.refs(p.host, ns, own_repo(p.name), opts) do
-          {:ok, refs} ->
+        case Host.remote(p.host, ns, own_repo(p.name), opts) do
+          {:ok, %{refs: refs}} ->
             where = %{owner: ns, repo: own_repo(p.name), path: ""}
             choose(p, refs, versions(refs, ""), where, "tag vX.Y.Z", opts)
 
@@ -86,36 +90,36 @@ defmodule SpriteProfiles.Names do
     end
   end
 
-  @doc "The refusal for a name on a host this version cannot fetch from."
-  def host_not_supported(%Pick{host: host}, pick) do
-    refusal(
-      :host_not_supported,
-      pick,
-      "is on #{host}, and only names on GitHub can be resolved so far; pick it by address once other hosts are supported, or publish it on GitHub."
-    )
-  end
-
   ## the collection
 
   defp in_collection(p, ns, opts) do
-    case Host.refs(p.host, ns, @collection, opts) do
+    case Host.remote(p.host, ns, @collection, opts) do
       {:error, :not_found, _} ->
         {:error, not_found(p, ns, opts[:pick], false)}
 
       {:error, %Refusal{} = r} ->
         {:error, r}
 
-      {:ok, refs} ->
+      {:ok, %{refs: refs} = remote} ->
         head = refs["HEAD"]
 
-        with {:ok, folders} <- folders(p, ns, refs, head, opts) do
+        with {:ok, folders} <- folders(p, remote, head, opts) do
           case folders do
             [a, b] ->
+              by_address =
+                Address.to_string(%Address{
+                  host: p.host,
+                  owner: ns,
+                  repo: @collection,
+                  path: a,
+                  ref: "REF"
+                })
+
               {:error,
                refusal(
                  :name_ambiguous,
                  opts[:pick],
-                 "is in two folders of #{ns}/#{@collection}, #{a}/ and #{b}/, and a name must find one; ask the publisher to remove one, or pick it by address (#{ns}/#{@collection}/#{a}@REF)."
+                 "is in two folders of #{slug(p, ns, @collection)}, #{a}/ and #{b}/, and a name must find one; ask the publisher to remove one, or pick it by address (#{by_address})."
                )}
 
             [folder] ->
@@ -130,38 +134,44 @@ defmodule SpriteProfiles.Names do
               choose(p, refs, list, where, what, opts)
 
             [] ->
-              linked(p, ns, head, opts)
+              linked(p, remote, head, opts)
           end
         end
     end
   end
 
-  defp folders(p, ns, refs, head, opts) do
-    Enum.reduce_while([p.name, "profiles/#{p.name}"], {:ok, []}, fn folder, {:ok, acc} ->
-      cond do
-        versions(refs, folder <> "/") != [] ->
-          {:cont, {:ok, acc ++ [folder]}}
+  # A folder is the collection's when it has version tags, or holds a profile.toml at the
+  # default branch. The files are read together: on git, that is one fetch.
+  defp folders(p, remote, head, opts) do
+    candidates = [p.name, "profiles/#{p.name}"]
+    tagged = Enum.filter(candidates, &(versions(remote.refs, &1 <> "/") != []))
+    to_read = if head, do: Enum.map(candidates -- tagged, &(&1 <> "/profile.toml")), else: []
 
-        head == nil ->
-          {:cont, {:ok, acc}}
+    read =
+      if to_read == [],
+        do: {:ok, %{}},
+        else: Host.read_files(remote, head, to_read, opts)
 
-        true ->
-          case Host.read_file(p.host, ns, @collection, head, folder <> "/profile.toml", opts) do
-            {:ok, _} -> {:cont, {:ok, acc ++ [folder]}}
-            :missing -> {:cont, {:ok, acc}}
-            {:error, r} -> {:halt, {:error, r}}
-          end
-      end
-    end)
+    with {:ok, files} <- read do
+      {:ok,
+       Enum.filter(candidates, fn folder ->
+         folder in tagged or match?({:ok, _}, files[folder <> "/profile.toml"])
+       end)}
+    end
   end
 
   ## links.toml
 
-  defp linked(p, ns, head, opts) do
+  defp linked(p, remote, head, opts) do
+    ns = remote.ns
+
     text =
-      if head,
-        do: Host.read_file(p.host, ns, @collection, head, "links.toml", opts),
-        else: :missing
+      if head do
+        with {:ok, files} <- Host.read_files(remote, head, ["links.toml"], opts),
+             do: files["links.toml"]
+      else
+        :missing
+      end
 
     with {:ok, text} <- text,
          {:ok, target} <- link(text, p, ns, opts) do
@@ -200,7 +210,7 @@ defmodule SpriteProfiles.Names do
          refusal(
            :bad_links,
            opts[:pick],
-           "is looked up in #{ns}/#{@collection}'s links.toml, which is not valid TOML (#{Exception.message(e)}); ask the publisher to fix it."
+           "is looked up in #{slug(p, ns, @collection)}'s links.toml, which is not valid TOML (#{Exception.message(e)}); ask the publisher to fix it."
          )}
     end
   end
@@ -211,19 +221,19 @@ defmodule SpriteProfiles.Names do
     refusal(
       :bad_links,
       opts[:pick],
-      "is pointed by #{ns}/#{@collection}'s links.toml at #{target}, which is not REPO/path ending in the folder #{p.name}; ask the publisher to fix it."
+      "is pointed by #{slug(p, ns, @collection)}'s links.toml at #{target}, which is not REPO/path ending in the folder #{p.name}; ask the publisher to fix it."
     )
   end
 
   defp follow(p, ns, {repo, path}, opts) do
-    case Host.refs(p.host, ns, repo, opts) do
-      {:ok, refs} ->
+    case Host.remote(p.host, ns, String.downcase(repo), opts) do
+      {:ok, %{refs: refs}} ->
         where = %{owner: ns, repo: String.downcase(repo), path: path}
         choose(p, refs, versions(refs, path <> "/"), where, "tag #{path}/vX.Y.Z", opts)
 
-      {:error, :not_found, status} ->
-        address = %Address{owner: ns, repo: repo, path: path, ref: ""}
-        {:error, GitHub.repo_not_found(address, status, opts)}
+      {:error, :not_found, why} ->
+        address = %Address{host: p.host, owner: ns, repo: repo, path: path, ref: ""}
+        {:error, Host.repo_not_found(address, why, opts)}
 
       {:error, %Refusal{} = r} ->
         {:error, r}
@@ -249,24 +259,26 @@ defmodule SpriteProfiles.Names do
   end
 
   defp choose(p, refs, list, where, what, opts) do
+    at = fn ref ->
+      %Address{host: p.host, owner: where.owner, repo: where.repo, path: where.path, ref: ref}
+    end
+
     found = fn ref, sha, kind, version ->
       {:ok,
        %{
          host: p.host,
-         address: %Address{owner: where.owner, repo: where.repo, path: where.path, ref: ref},
+         address: at.(ref),
          sha: sha,
          kind: kind,
          version: version
        }}
     end
 
-    slug = "#{where.owner}/#{where.repo}"
+    slug = slug(p, where.owner, where.repo)
 
     case {p.version, list} do
       {{:ref, ref}, _} ->
-        address = %Address{owner: where.owner, repo: where.repo, path: where.path, ref: ref}
-
-        with {:ok, sha, kind} <- GitHub.find_ref(refs, ref, address, opts),
+        with {:ok, sha, kind} <- GitHub.find_ref(refs, ref, at.(ref), opts),
              do: found.(ref, sha, kind, nil)
 
       {nil, []} ->
@@ -304,18 +316,27 @@ defmodule SpriteProfiles.Names do
   end
 
   defp not_found(p, ns, pick, collection?) do
+    own = slug(p, ns, own_repo(p.name))
+    coll = slug(p, ns, @collection)
+
     looked =
       if collection?,
         do:
-          "no repository #{ns}/#{own_repo(p.name)}, no folder #{p.name}/ or profiles/#{p.name}/ in #{ns}/#{@collection}, and no #{p.name} in its links.toml",
-        else: "no repository #{ns}/#{own_repo(p.name)} and no collection #{ns}/#{@collection}"
+          "no repository #{own}, no folder #{p.name}/ or profiles/#{p.name}/ in #{coll}, and no #{p.name} in its links.toml",
+        else: "no repository #{own} and no collection #{coll}"
+
+    who = if p.host == @github, do: "GitHub shows", else: "#{p.host} has"
 
     refusal(
       :name_not_found,
       pick,
-      "is not published: GitHub shows #{looked}; check the spelling. Only public repositories can be found."
+      "is not published: #{who} #{looked}; check the spelling. A private repository is found through git's own credentials for #{p.host} (a credential helper): sprite-profiles never asks for them."
     )
   end
+
+  # A repository as sentences name it: `ns/repo` on GitHub, `host/ns/repo` elsewhere.
+  defp slug(%Pick{host: @github}, ns, repo), do: "#{ns}/#{repo}"
+  defp slug(%Pick{host: host}, ns, repo), do: "#{host}/#{ns}/#{repo}"
 
   defp refusal(code, pick, rest), do: Refusal.new(code, [pick], "profile '#{pick}' #{rest}")
 end

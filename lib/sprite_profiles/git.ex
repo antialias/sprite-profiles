@@ -13,12 +13,15 @@ defmodule SpriteProfiles.Git do
       `uploadpack.allowAnySHA1InWant`) is asked instead for the tag or branch that points at
       it, and the commit it gives is checked against the sha.
     * `fetch_cached/4` does the same through the cache.
+    * `read_files/4` reads single files of one commit (a collection's `links.toml`, whether
+      a folder holds a `profile.toml`) from the same blob-less fetch, with no checkout and
+      no cache.
 
   ## What is refused
 
   Inside the fetched folder: a symlink or a submodule (`bad_archive`), and more than
   32 MB of files (`archive_too_large`). The rest of the repository is never checked out, so
-  it may hold anything. A folder the commit lacks is `profile_dir_missing`. Git itself gives
+  it may hold anything. A folder the commit lacks is `profile_not_found`. Git itself gives
   `git_missing` (no `git` on PATH), `repo_not_found` (no such repository, or it needs
   credentials git does not have), `ref_not_found` (no such commit) and `fetch_failed`
   (anything else, and the timeout). A URL git should not be handed is `bad_address`.
@@ -272,6 +275,59 @@ defmodule SpriteProfiles.Git do
     |> Map.new()
   end
 
+  ## single files
+
+  @doc """
+  Reads `paths` (relative to the repository's root) of commit `sha` of `url`, with no
+  checkout: `{:ok, %{path => {:ok, text} | :missing}}` or `{:error, refusal}`. A path that is
+  not a regular file at that commit (absent, a folder, a symlink) is `:missing`. Only the
+  commit's trees and the blobs read are downloaded.
+  """
+  @spec read_files(String.t(), String.t(), [String.t()], keyword()) ::
+          {:ok, %{optional(String.t()) => {:ok, binary()} | :missing}} | {:error, Refusal.t()}
+  def read_files(url, sha, paths, opts \\ []) do
+    pick = opts[:pick] || redact(url)
+
+    with :ok <- check_sha(sha, url, pick),
+         {:ok, st} <- start(url, pick, opts) do
+      st = Map.merge(st, %{sha: String.downcase(sha), parts: []})
+      tmp = make_tmp(System.tmp_dir!())
+      work = Path.join(tmp, "repo")
+      File.mkdir_p!(work)
+
+      try do
+        with :ok <- step(st, ["init", "-q", "--template="], work),
+             :ok <- step(st, ["remote", "add", "origin", url], work),
+             :ok <- fetch_commit(st, work) do
+          Enum.reduce_while(paths, {:ok, %{}}, fn path, {:ok, acc} ->
+            case read_one(st, path, work) do
+              {:error, r} -> {:halt, {:error, r}}
+              result -> {:cont, {:ok, Map.put(acc, path, result)}}
+            end
+          end)
+        end
+      after
+        File.rm_rf(tmp)
+      end
+    end
+  end
+
+  defp read_one(st, path, work) do
+    with {:ok, [_ | _] = parts} <- path_parts(path),
+         {:ok, out} <- git(st, ["ls-tree", "-z", st.sha, "--", Enum.join(parts, "/")], work),
+         [entry | _] <- String.split(out, <<0>>, trim: true),
+         [meta, _name] <- String.split(entry, "\t", parts: 2),
+         [mode, "blob", oid] when mode in ["100644", "100755"] <- String.split(meta, " ") do
+      case git(st, ["cat-file", "blob", oid], work) do
+        {:ok, text} -> {:ok, text}
+        error -> {:error, git_refusal(st, "cat-file", error)}
+      end
+    else
+      {:error, _} = error -> {:error, git_refusal(st, "ls-tree", error)}
+      _ -> :missing
+    end
+  end
+
   ## fetch
 
   @doc """
@@ -408,7 +464,7 @@ defmodule SpriteProfiles.Git do
       {:error, {:exit, _, _}} ->
         {:error,
          Refusal.new(
-           :profile_dir_missing,
+           :profile_not_found,
            [st.pick],
            "profile '#{st.pick}' names #{folder(st.parts)}, which #{redact(st.url)} does not have at #{short(st.sha)}; check the path."
          )}
