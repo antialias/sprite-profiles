@@ -1,0 +1,26 @@
+format      = 2
+name        = "anthropic"
+summary     = "Claude's model through a connector; no API key in the Sprite"
+description = """
+Points Claude Code at Anthropic's API through a custom API connector in your org that \
+holds an Anthropic API key. The Sprite never sees the key: Claude Code sends a placeholder \
+in x-api-key, and the gateway replaces it with the stored key on the way out. Create the \
+connector once with `sprite-profiles connect anthropic`. Unlike anthropic-key it is not \
+privileged, so an agent may launch a set that holds it, and it can be checkpointed."""
+
+[env]
+ANTHROPIC_BASE_URL = { from = "connector", provider = "custom_api" }
+# Not a key: the gateway replaces this header with the connector's key.
+ANTHROPIC_API_KEY  = "placeholder-the-fly-gateway-adds-the-key"
+
+[policy]
+rules = [
+  { include = "defaults" },
+  { action = "allow", domain = "api.sprites.dev" },
+]
+
+[[connectors]]
+provider  = "custom_api"
+base_url  = "https://api.anthropic.com"
+auth      = { method = "custom_header", header = "x-api-key" }
+endpoints = ["/v1/*"]

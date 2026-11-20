@@ -10,7 +10,7 @@ defmodule SpriteProfiles.ExampleProfilesTest do
       assert errors == []
 
       assert Enum.map(profiles, & &1.name) ==
-               ~w(anthropic-key claude-code github github-mcp playwright preview)
+               ~w(anthropic anthropic-key claude-code github github-mcp playwright preview)
     end
 
     test "no secret appears outside a privileged profile" do
