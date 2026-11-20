@@ -15,7 +15,8 @@ defmodule SpriteProfiles.Launcher do
     4. Set the network policy, when the plan has one.
     5. Per profile, in plan order: push `files/` and skills, lay its Claude settings over the
        Sprite's, register its MCP servers, run `setup.sh` under a Sprites Task hold with a
-       heartbeat, then create its services. The env file is written at the start of each
+       heartbeat (its output passed on, line by line, as it comes), then create its
+       services. The env file is written at the start of each
        phase.
     6. Checkpoint with the comment `profiled: <set>`.
     7. Apply privileged and `checkpoint = false` profiles the same way.
@@ -27,6 +28,7 @@ defmodule SpriteProfiles.Launcher do
   alias SpriteProfiles.{
     ClaudeSettings,
     Merge,
+    OutputLines,
     Plan,
     Profile,
     ProfilePath,
@@ -81,6 +83,9 @@ defmodule SpriteProfiles.Launcher do
     * `:destroy_on_failure` - destroy the Sprite when a step after its creation fails
     * `:state_dir` - where launch records go (default `#{@state_dir}`)
     * `:on_step` - `fun(step)`, called as each step finishes, for live output
+    * `:on_output` - `fun(profile, line)`, called with each line `setup.sh` prints, as it
+      prints it: complete lines only (a partial one waits for its newline or the end),
+      without control sequences or carriage returns
     * `:on_resolved` - `fun(plan)`, called once the set is resolved, before any API call
   """
   def launch(names, opts) do
@@ -105,6 +110,7 @@ defmodule SpriteProfiles.Launcher do
         created: false,
         steps: [],
         on_step: Keyword.get(opts, :on_step, fn _ -> :ok end),
+        on_output: opts[:on_output],
         started_at: DateTime.utc_now()
       }
 
@@ -347,12 +353,14 @@ defmodule SpriteProfiles.Launcher do
 
       with :ok <- write(state, "#{@setup_dir}/#{p}.sh", script, 0o755),
            {:ok, out} <-
-             sh(
-               state,
-               "bash \"$HOME/#{@runner}\" " <> Enum.map_join(args, " ", &sh_quote/1),
-               timeout: (profile.timeout + 60) * 1000
-             ) do
-        {:ok, state, last_line(out)}
+             live_lines(state.on_output, p, fn stream ->
+               sh(
+                 state,
+                 "bash \"$HOME/#{@runner}\" " <> Enum.map_join(args, " ", &sh_quote/1),
+                 [timeout: (profile.timeout + 60) * 1000] ++ stream
+               )
+             end) do
+        {:ok, state, out |> last_line() |> OutputLines.clean()}
       end
     end
   end
@@ -558,6 +566,26 @@ defmodule SpriteProfiles.Launcher do
       {:ok, %{status: 0, output: out}} -> {:ok, out}
       {:ok, %{status: code, output: out}} -> {:error, "exited #{code}: #{tail(out)}"}
       {:error, message} -> {:error, message}
+    end
+  end
+
+  # Runs `fun` with the exec options that pass each line of output to `on_output` as it
+  # arrives, holding a partial line until its newline, and the last one until the end.
+  defp live_lines(nil, _p, fun), do: fun.([])
+
+  defp live_lines(on_output, p, fun) do
+    {:ok, buffer} = Agent.start_link(fn -> "" end)
+
+    feed = fn chunk ->
+      lines = Agent.get_and_update(buffer, &OutputLines.split(&1, chunk))
+      Enum.each(lines, &on_output.(p, &1))
+    end
+
+    try do
+      fun.(on_output: feed)
+    after
+      buffer |> Agent.get(& &1) |> OutputLines.flush() |> Enum.each(&on_output.(p, &1))
+      Agent.stop(buffer)
     end
   end
 

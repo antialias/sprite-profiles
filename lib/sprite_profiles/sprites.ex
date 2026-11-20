@@ -58,6 +58,12 @@ defmodule SpriteProfiles.Sprites do
               mode :: integer()
             ) ::
               :ok | error
+  @doc """
+  Runs `argv` in the Sprite and returns its status and its whole output, stdout and stderr
+  together. Options: `:timeout` (ms), and `:on_output`, `fun(chunk)`, called with each piece
+  of output as it arrives (a chunk is not a line; it may end mid-line). An adapter that
+  cannot stream calls it once with the whole output at the end.
+  """
   @callback exec(config, name :: String.t(), argv :: [String.t()], opts :: keyword()) ::
               {:ok, %{status: integer(), output: binary()}} | error
   @callback checkpoint(config, name :: String.t(), comment :: String.t()) ::

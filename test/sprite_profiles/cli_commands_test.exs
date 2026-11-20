@@ -345,6 +345,54 @@ defmodule SpriteProfiles.CLICommandsTest do
              ~r/^✓ demo-1: 1 profile · 0 connectors admitted · checkpointed · \d+\.\d s$/
   end
 
+  test "a launch prints setup.sh's lines as they come, before its step line", %{tmp_dir: tmp} do
+    respond = fn
+      {:exec, [_, ["bash", "-c", s], opts]} ->
+        if s =~ "run-setup.sh\" " do
+          opts[:on_output].("Open https://example/device\nenter ")
+          opts[:on_output].("\e[1mABCD-1234\e[0m\n")
+
+          {:streamed,
+           {:ok, %{status: 0, output: "Open https://example/device\nenter ABCD-1234\n"}}}
+        else
+          :default
+        end
+
+      _ ->
+        :default
+    end
+
+    {sprites, _log} = FakeSprites.start(respond)
+    test = self()
+
+    out = %SpriteProfiles.Out{
+      info: &send(test, {:info, &1}),
+      error: &send(test, {:error, &1}),
+      usage: & &1
+    }
+
+    opts = [
+      dirs: [@profiles],
+      name: "demo-1",
+      sprites: sprites,
+      state_dir: Path.join(tmp, "launches")
+    ]
+
+    assert Commands.Launch.run(["claude-code"], opts, out) == 0
+    {:messages, messages} = Process.info(self(), :messages)
+    refute Enum.any?(messages, &match?({:error, _}, &1))
+    lines = for {:info, l} <- messages, do: l
+    i = Enum.find_index(lines, &(&1 == "  setup claude-code | Open https://example/device"))
+    assert i
+
+    assert [
+             "  setup claude-code | enter ABCD-1234",
+             "  setup claude-code" <> step
+           ] = Enum.slice(lines, i + 1, 2)
+
+    assert step =~ ~r/^\s+\d+\.\d\d s  enter ABCD-1234$/
+  end
+
   test "the launch summary ends with one line for a recording" do
     record = %{
       name: "demo",

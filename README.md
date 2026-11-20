@@ -216,7 +216,8 @@ The launcher prints each step's time as it goes:
    for a published one).
 4. Set the network policy.
 5. Apply each profile in order: files, skills, Claude settings, MCP servers, then
-   `setup.sh` (holding a Sprites Task so the Sprite stays awake), then services.
+   `setup.sh` (holding a Sprites Task so the Sprite stays awake, and showing its output
+   as it runs), then services.
 6. Checkpoint it as `profiled: claude-code+preview`.
 7. Apply privileged profiles, after the checkpoint.
 

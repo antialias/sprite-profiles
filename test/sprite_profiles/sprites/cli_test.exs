@@ -118,6 +118,45 @@ defmodule SpriteProfiles.Sprites.CliTest do
            ]
   end
 
+  test "exec with on_output asks the runner to merge and stream" do
+    test = self()
+    on_output = &send(test, {:chunk, &1})
+
+    cfg = [
+      runner: fn _bin, _args, {:merge, f} ->
+        f.("one\ntw")
+        f.("o\n")
+        {"one\ntwo\n", 0}
+      end
+    ]
+
+    assert {:ok, %{status: 0, output: "one\ntwo\n"}} =
+             Cli.exec(cfg, "demo-1", ["true"], on_output: on_output)
+
+    assert_received {:chunk, "one\ntw"}
+    assert_received {:chunk, "o\n"}
+  end
+
+  test "the default runner streams merged output as it is printed, and returns it all" do
+    test = self()
+
+    on_output = fn chunk ->
+      send(test, {:chunk, chunk, System.monotonic_time(:millisecond)})
+    end
+
+    t0 = System.monotonic_time(:millisecond)
+    script = "printf 'first\\n'; sleep 0.3; printf 'second\\n' >&2"
+
+    assert {"first\nsecond\n", 0} = Cli.default_runner("sh", ["-c", script], {:merge, on_output})
+
+    assert {:messages, messages} = Process.info(self(), :messages)
+    chunks = for {:chunk, c, t} <- messages, do: {c, t - t0}
+    assert Enum.map_join(chunks, &elem(&1, 0)) == "first\nsecond\n"
+    # The first line arrived well before the command ended.
+    assert [{"first\n", t_first} | _] = chunks
+    assert t_first < 250
+  end
+
   test "the default runner passes standard input through and ends it" do
     assert {"hello", 0} = Cli.default_runner("cat", [], {:stdin, "hello"})
   end

@@ -11,8 +11,34 @@ defmodule SpriteProfiles.Sprites.Cli do
 
     * `:bin` - the CLI to run (default `"sprite"`)
     * `:runner` - `fun(bin, args, stderr) -> {stdout, exit_status}`, where `stderr` is
-      `:merge` or `:discard`; tests replace it
+      `:merge`, `{:merge, on_output}` (merged, and each chunk passed to `on_output` as it
+      comes), `:discard` or `{:stdin, data}`; tests replace it
   """
+
+  defmodule Tap do
+    @moduledoc false
+    # A collectable for `System.cmd/3`'s `:into`: passes each chunk to `fun` and collects
+    # the whole output.
+    defstruct [:fun]
+
+    defimpl Collectable do
+      def into(%{fun: fun}) do
+        collector = fn
+          acc, {:cont, chunk} ->
+            fun.(chunk)
+            [acc | chunk]
+
+          acc, :done ->
+            IO.iodata_to_binary(acc)
+
+          _acc, :halt ->
+            :ok
+        end
+
+        {[], collector}
+      end
+    end
+  end
 
   @behaviour SpriteProfiles.Sprites
 
@@ -96,8 +122,9 @@ defmodule SpriteProfiles.Sprites.Cli do
   end
 
   @impl true
-  def exec(cfg, name, argv, _opts) do
-    {out, code} = run(cfg, ["exec", "-s", name, "--no-stdin", "--" | argv], :merge)
+  def exec(cfg, name, argv, opts) do
+    stderr = if f = opts[:on_output], do: {:merge, f}, else: :merge
+    {out, code} = run(cfg, ["exec", "-s", name, "--no-stdin", "--" | argv], stderr)
     {:ok, %{status: code, output: out}}
   end
 
@@ -200,6 +227,10 @@ defmodule SpriteProfiles.Sprites.Cli do
 
   @doc false
   def default_runner(bin, args, :merge), do: System.cmd(bin, args, stderr_to_stdout: true)
+
+  # Each chunk goes to `on_output` as `sprite exec` prints it; the whole is still returned.
+  def default_runner(bin, args, {:merge, on_output}),
+    do: System.cmd(bin, args, stderr_to_stdout: true, into: %__MODULE__.Tap{fun: on_output})
 
   # `sprite api` writes "Calling API: ..." and curl's own messages to stderr.
   def default_runner(bin, args, :discard),

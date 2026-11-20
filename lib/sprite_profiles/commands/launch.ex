@@ -2,7 +2,7 @@ defmodule SpriteProfiles.Commands.Launch do
   @moduledoc """
   The launch command, shared by `sprite-profiles launch` and `mix profiles.launch`: resolve
   a set, then either print its plan (`dry_run`) or create a Sprite and apply it, printing
-  each step as it finishes and a summary. Returns the exit status: 0, 1 (refused or a step
+  each step as it finishes, each line a `setup.sh` prints as it prints it, and a summary. Returns the exit status: 0, 1 (refused or a step
   failed) or 2 (bad usage).
 
   Options: `:dirs` (the search path), `:set_opts` (from `SpriteProfiles.SetArgs.picks/1`:
@@ -45,6 +45,7 @@ defmodule SpriteProfiles.Commands.Launch do
           sprites: sprites,
           destroy_on_failure: opts[:destroy_on_failure] || false,
           on_step: &print_step(out, &1),
+          on_output: &print_output(out, &1, &2),
           on_resolved: &print_sources(out, &1)
         ] ++ Keyword.take(opts, [:state_dir])
 
@@ -122,6 +123,9 @@ defmodule SpriteProfiles.Commands.Launch do
       "#{mark} #{String.pad_trailing(step_name(s), 34)} #{seconds(s.ms)}  #{one_line(s.detail)}"
     )
   end
+
+  # A line `setup.sh` printed, as it prints it, under the step it belongs to.
+  defp print_output(out, profile, line), do: Out.info(out, "  setup #{profile} | #{line}")
 
   defp step_name(%{step: step, profile: nil}), do: to_string(step)
   defp step_name(%{step: step, profile: p}), do: "#{step} #{p}"

@@ -495,7 +495,11 @@ another language should do the same, in this order:
    - run `setup.sh` under a Sprites Task hold named `profiled-setup-<qualified name>`, with
      `.` written `--` since a Task name takes only `a-z`, `0-9` and `-`; extended
      every 60 s and released when the script ends, within its `timeout`, with
-     `PROFILED_PROFILE`, `PROFILED_SET` and the env file loaded;
+     `PROFILED_PROFILE`, `PROFILED_SET` and the env file loaded. Its output (stdout and
+     stderr together) is shown live, a line at a time as each line ends, so a person can
+     act on what it asks while the launch waits (a device sign-in's address and code).
+     Control sequences and carriage returns are removed from each line first, so a
+     Sprite cannot redraw the launching terminal;
    - create its services (`~` in `dir` is expanded), each with that phase's env, the set
      the env file holds. Services come after `setup.sh`, so a service may run what the
      script installed.

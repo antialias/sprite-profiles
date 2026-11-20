@@ -13,7 +13,7 @@ defmodule SpriteProfiles.Sprites.Api do
   Status: the paths and bodies are the ones the `Cli` adapter uses through `sprite api`,
   which were run against real Sprites. Exec (`POST .../exec`) and file writes (`PUT
   .../fs/write`) are documented endpoints this adapter alone uses; they are tested against a
-  stub only.
+  stub only. Exec streams its answer, so `:on_output` sees output as it comes.
   """
 
   @behaviour SpriteProfiles.Sprites
@@ -109,14 +109,36 @@ defmodule SpriteProfiles.Sprites.Api do
     params = Enum.map(argv, &{:cmd, &1})
     timeout = Keyword.get(opts, :timeout, 120_000)
 
+    stream = if f = opts[:on_output], do: [into: stream_exec(f)], else: []
+
     with {:ok, body} <-
-           request(cfg, :post, Rest.sprite_path(name) <> "/exec",
-             params: params,
-             decode_body: false,
-             receive_timeout: timeout
+           request(
+             cfg,
+             :post,
+             Rest.sprite_path(name) <> "/exec",
+             [params: params, decode_body: false, receive_timeout: timeout] ++ stream
            ) do
       {status, output} = Rest.exec_result(body)
       {:ok, %{status: status, output: output}}
+    end
+  end
+
+  # Collects the body as it streams in, as `request/4` reads it, and passes each chunk's
+  # decoded output to `on_output`; an error answer's body is only collected.
+  defp stream_exec(on_output) do
+    fn {:data, data}, {req, resp} ->
+      resp = %{resp | body: (resp.body || "") <> data}
+
+      resp =
+        if resp.status in 200..299 do
+          {output, pending} = Rest.exec_chunk(Req.Response.get_private(resp, :exec, false), data)
+          if output != "", do: on_output.(output)
+          Req.Response.put_private(resp, :exec, pending)
+        else
+          resp
+        end
+
+      {:cont, {req, resp}}
     end
   end
 

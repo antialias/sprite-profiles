@@ -92,16 +92,30 @@ defmodule SpriteProfiles.Sprites.Rest do
   as markers wherever they appear; command output does not normally hold those control
   characters. A body with no exit frame gives status 255.
   """
-  def exec_result(body) when is_binary(body), do: exec_scan(body, [], nil)
+  def exec_result(body) when is_binary(body) do
+    {status, output, _} = exec_scan(body, [], nil)
+    {status || 255, output}
+  end
+
+  @doc """
+  Decodes one chunk of the HTTP exec body as it streams in, for live output. `pending` is
+  `false` at the start, and then what the last call returned: `true` when that chunk ended
+  with the exit marker, whose status byte is the first of this one. Returns `{output,
+  pending}`; `exec_result/1` on the whole body still gives the status and full output.
+  """
+  def exec_chunk(pending, chunk) when is_binary(chunk) do
+    bin = if pending, do: <<3, chunk::binary>>, else: chunk
+    {_, output, dangling} = exec_scan(bin, [], nil)
+    {output, dangling}
+  end
 
   defp exec_scan(<<3, code, rest::binary>>, out, _), do: exec_scan(rest, out, code)
-  defp exec_scan(<<3>>, out, status), do: exec_scan(<<>>, out, status)
+  defp exec_scan(<<3>>, out, status), do: {status, finish(out), true}
 
   defp exec_scan(<<s, rest::binary>>, out, status) when s in [1, 2],
     do: exec_scan(rest, out, status)
 
-  defp exec_scan(<<>>, out, status),
-    do: {status || 255, out |> Enum.reverse() |> IO.iodata_to_binary()}
+  defp exec_scan(<<>>, out, status), do: {status, finish(out), false}
 
   defp exec_scan(bin, out, status) do
     # Take the run of ordinary bytes up to the next marker in one step.
@@ -117,6 +131,8 @@ defmodule SpriteProfiles.Sprites.Rest do
         )
     end
   end
+
+  defp finish(out), do: out |> Enum.reverse() |> IO.iodata_to_binary()
 
   @doc "Splits an NDJSON body into decoded events, skipping lines that are not JSON."
   def ndjson(body) when is_binary(body) do

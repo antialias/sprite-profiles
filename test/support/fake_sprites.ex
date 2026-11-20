@@ -87,7 +87,19 @@ defmodule SpriteProfiles.FakeSprites do
           {:ok, %{status: 0, output: ""}}
       end
 
-    call(cfg, :exec, [name, argv, opts], default)
+    case call(cfg, :exec, [name, argv, opts], default) do
+      # Like an adapter that cannot stream: everything at once, at the end. A `respond`
+      # function that streams calls `opts[:on_output]` itself and answers `{:streamed, _}`.
+      {:streamed, answer} ->
+        answer
+
+      {:ok, %{output: out}} = answer ->
+        if opts[:on_output] && out != "", do: opts[:on_output].(out)
+        answer
+
+      answer ->
+        answer
+    end
   end
 
   @impl true

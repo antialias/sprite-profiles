@@ -350,6 +350,72 @@ defmodule SpriteProfiles.LauncherTest do
       assert FakeSprites.calls(log, :set_labels) == [["demo-1", ["profile:preview"]]]
     end
 
+    test "setup.sh output is passed on line by line as it arrives", ctx do
+      {:ok, printed} = Agent.start_link(fn -> [] end)
+      on_output = fn p, line -> Agent.update(printed, &(&1 ++ [{p, line}])) end
+      chunks = ["Open https://exa", "mple/device\n\e[1menter\e[0m ", "ABCD-1234\r\n", "waiting"]
+      full = Enum.join(chunks)
+
+      respond = fn
+        {:exec, [_, ["bash", "-c", s], opts]} ->
+          if s =~ "run-setup.sh\" " do
+            # After each chunk, what has been printed so far.
+            seen =
+              for chunk <- chunks do
+                opts[:on_output].(chunk)
+                Process.sleep(20)
+                Agent.get(printed, &Enum.map(&1, fn {_, l} -> l end))
+              end
+
+            send(self(), {:seen, seen})
+            {:streamed, {:ok, %{status: 0, output: full}}}
+          else
+            :default
+          end
+
+        _ ->
+          :default
+      end
+
+      {sprites, log} = FakeSprites.start(respond)
+
+      assert {:ok, record} =
+               Launcher.launch(["claude-code"], opts(ctx, sprites, on_output: on_output))
+
+      assert_received {:seen, seen}
+
+      assert seen == [
+               [],
+               ["Open https://example/device"],
+               ["Open https://example/device", "enter ABCD-1234"],
+               ["Open https://example/device", "enter ABCD-1234"]
+             ]
+
+      # The partial last line comes at the end.
+      assert Agent.get(printed, & &1) == [
+               {"claude-code", "Open https://example/device"},
+               {"claude-code", "enter ABCD-1234"},
+               {"claude-code", "waiting"}
+             ]
+
+      # The step's detail is still the output's last line, and only setup streams.
+      assert Enum.find(record.steps, &(&1.step == :setup)).detail == "waiting"
+
+      streamed =
+        for [_, ["bash", "-c", s], opts] <- FakeSprites.calls(log, :exec),
+            opts[:on_output],
+            do: s
+
+      assert [run] = streamed
+      assert run =~ "run-setup.sh\" "
+    end
+
+    test "without on_output, setup.sh runs as before", ctx do
+      {sprites, log} = FakeSprites.start()
+      assert {:ok, _} = Launcher.launch(["claude-code"], opts(ctx, sprites))
+      assert Enum.all?(FakeSprites.calls(log, :exec), fn [_, _, opts] -> !opts[:on_output] end)
+    end
+
     test "a failing setup stops the launch; the Sprite stays unless asked", ctx do
       fail = fn
         {:exec, [_, ["bash", "-c", s], _]} ->

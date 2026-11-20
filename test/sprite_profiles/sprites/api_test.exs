@@ -167,6 +167,44 @@ defmodule SpriteProfiles.Sprites.ApiTest do
              Api.exec(cfg, "demo-1", ["bash", "-c", "echo out; exit 2"], [])
   end
 
+  test "exec with on_output passes each chunk's output on as it streams in" do
+    # The exit marker and its status byte arrive in different chunks.
+    chunks = [<<1, "Open https://ex">>, <<"ample/device\n", 2, "enter ">>, "CODE\n", <<3>>, <<0>>]
+
+    cfg =
+      stub(:api_exec_stream, fn conn ->
+        conn = Plug.Conn.send_chunked(conn, 200)
+
+        Enum.reduce(chunks, conn, fn chunk, conn ->
+          {:ok, conn} = Plug.Conn.chunk(conn, chunk)
+          conn
+        end)
+      end)
+
+    test = self()
+    on_output = &send(test, {:chunk, &1})
+
+    assert {:ok, %{status: 0, output: "Open https://example/device\nenter CODE\n"}} =
+             Api.exec(cfg, "demo-1", ["true"], on_output: on_output)
+
+    assert {:messages, messages} = Process.info(self(), :messages)
+
+    assert for({:chunk, c} <- messages, do: c) ==
+             ["Open https://ex", "ample/device\nenter ", "CODE\n"]
+  end
+
+  test "exec with on_output passes nothing on from an error answer" do
+    cfg = stub(:api_exec_error, &Plug.Conn.send_resp(&1, 502, "bad gateway"))
+    test = self()
+
+    assert {:error, message} =
+             Api.exec(cfg, "demo-1", ["true"], on_output: &send(test, {:chunk, &1}))
+
+    assert message =~ "answered 502"
+    assert message =~ "bad gateway"
+    refute_received {:chunk, _}
+  end
+
   test "checkpoint reads the id from the complete event" do
     cfg =
       stub(:api_checkpoint, fn conn ->
