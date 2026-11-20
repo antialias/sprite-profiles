@@ -384,3 +384,26 @@ none. `HOST` below stands for the server's name.
 `sprite-profiles --version` takes 0.17 s and `plan claude-code` 0.18 s, with no Erlang or
 Elixir on the PATH. Its `plan` output matched `mix profiles.plan` byte for byte on five sets,
 and it fetched a profile from GitHub over HTTPS with the certificates in the release.
+
+## Claude's model through a connector, and the recorded demo
+
+20 Nov 2026, with the `v0.1.0` binary's code on macOS arm64.
+
+- **`anthropic`**: a custom API connector in front of `https://api.anthropic.com`, the key in
+  `x-api-key`, endpoints `/v1/*`. Inside a Sprite launched with `claude-code anthropic
+  @antialias/shop-inventory`, `ANTHROPIC_API_KEY` is a placeholder and no environment
+  variable holds a key. `claude -p` answered as Claude Opus 5.5 and read the shop through its
+  own connector in 12.5 s. The gateway refused a path outside `/v1` (403), and the shop's
+  own address was unreachable from the Sprite (`000`).
+- **A wrong key fails at the provider.** With a credential Anthropic didn't accept, every
+  request through the gateway came back `401 invalid x-api-key`, also when the Sprite sent no
+  `x-api-key` at all, which shows the gateway adds its stored header either way. Fly's
+  connector shows `auth_header_prefix: Bearer` for a `custom_header` connector; per Fly's API
+  reference it applies only to `Authorization`, and the working key confirmed that.
+- **The recording** ([`demo/demo.sh`](../demo/demo.sh), asciinema, rendered with agg): search
+  to a destroyed Sprite in 1 min 28 s. The launch took 7.0 s (3 profiles, 2 connectors
+  admitted, checkpointed); Claude's answer, three projects from the shop's real tools, took
+  most of the rest.
+- **Release `v0.1.0`**: the tag's workflow built and attached `macos_arm64`, `linux_x86_64`
+  and `linux_arm64` binaries with SHA-256 files. A push of more than three tags at once
+  starts no workflow on GitHub, so `v0.1.0` went up on its own.

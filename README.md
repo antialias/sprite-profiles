@@ -11,6 +11,13 @@ A **profile** is a small folder: what to install, files to push, services to run
 network rules and connectors it needs, Claude Code skills and MCP servers, and whether it
 holds a credential.
 
+![Finding a shop's published profile, launching a Sprite with Claude Code, its model and the shop in 7 seconds, asking Claude what to build, and checking the Sprite holds no key](demo/demo.gif)
+
+*One take, run for real: search GitHub for a profile, launch a Sprite with Claude Code, its
+model and a shop's inventory, each through a Fly connector, ask Claude in the Sprite, then
+show that the Sprite holds a placeholder rather than the key and can't reach the shop
+directly. [`demo/demo.sh`](demo/demo.sh) is the script; the org name is redacted.*
+
 ## Install
 
 Download `sprite-profiles` for your machine from the
