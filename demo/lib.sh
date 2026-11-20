@@ -17,7 +17,12 @@ type_line() {
   for ((i = 0; i < ${#s}; i++)); do printf '%s' "${s:i:1}"; sleep 0.015; done
   sleep 0.4; printf '\n'
 }
-run() { type_line "$1"; eval "$1"; subtitle "$subtitle_text"; sleep "${2:-2}"; }
+run() {
+  type_line "$1"; eval "$1"; local status=$?
+  subtitle "$subtitle_text"; sleep "${2:-2}"; return $status
+}
+# A step that failed ends the take: the Sprite is destroyed and the script exits 1.
+stop() { quietly sprite destroy --force demo; end; exit 1; }
 quietly() { "$@" >/dev/null 2>&1; }
 # A project folder holding this demo's own profile and the set, as a project file.
 project() {

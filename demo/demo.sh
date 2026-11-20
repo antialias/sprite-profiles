@@ -14,9 +14,9 @@ begin
 subtitle "A project lists the profiles it needs, its own among them."
 run "cat sprite-profiles.toml" 3
 subtitle "One command: a Sprite with all seven. Keys stay with Fly, not in the Sprite."
-run "sprite-profiles launch --name demo" 3
+run "sprite-profiles launch --name demo" 3 || stop
 subtitle "Ask Claude, inside the Sprite."
-run 'sprite-profiles exec demo claude -p "Build the weekend page."' 4
+run 'sprite-profiles exec demo claude -p "Build the weekend page."' 4 || stop
 subtitle "It built a page from the shop's real inventory: its screenshot is below."
 quietly sprite file pull -s demo /home/sprite/site/screenshot.png "$here/weekend.png"
 sleep 3
