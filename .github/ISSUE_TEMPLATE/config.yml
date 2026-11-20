@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/antialias/sprite-profiles/discussions
+    about: Ask how to write a profile, or share one you're working on.
+  - name: Browse published profiles
+    url: https://github.com/topics/sprite-profile
+    about: Every repository with the sprite-profile topic.

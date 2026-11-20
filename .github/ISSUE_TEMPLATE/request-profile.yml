@@ -1,0 +1,38 @@
+name: Request a profile
+description: Ask for a profile that doesn't exist yet.
+title: "Profile request: "
+labels: ["profile request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Say what a Sprite should get. If you run the tool or service, consider publishing the
+        profile yourself: the README's "Publish yours in three steps" takes a few minutes.
+  - type: input
+    id: what
+    attributes:
+      label: Tool or service
+      placeholder: "Linear, Postgres, a language toolchain"
+    validations:
+      required: true
+  - type: textarea
+    id: gives
+    attributes:
+      label: What a Sprite should get
+      description: What should work in the Sprite once the profile is applied.
+    validations:
+      required: true
+  - type: textarea
+    id: reach
+    attributes:
+      label: What it needs to reach
+      description: >-
+        Domains, an API that needs a token (a connector keeps it out of the Sprite), a sign-in,
+        or a service that should run in the Sprite.
+  - type: dropdown
+    id: vendor
+    attributes:
+      label: Are you the tool's vendor?
+      options:
+        - "No"
+        - "Yes, and I may publish it"

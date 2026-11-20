@@ -1,6 +1,30 @@
 # Contributing
 
-## Before you open a pull request
+## Publish a profile
+
+The most useful contribution is a profile. It lives in your own repository, not this one, so
+you need no one's approval to publish it:
+
+1. Start from the [template](https://github.com/antialias/sprite-profile-template), or name a
+   public repository `sprite-profile-NAME` with `profile.toml` at its root.
+2. Tag a version and give the repository the topic `sprite-profile`.
+3. [Add it to the gallery](../../issues/new?template=add-profile.yml) in the README.
+
+[Writing a profile](docs/WRITING.md) and [Publishing a profile](docs/PUBLISHING.md) have the
+details. A profile you'd like but can't write yourself is a
+[request](../../issues/new?template=request-profile.yml). Questions go to
+[Discussions](../../discussions).
+
+A good profile does one thing, declares every domain it reaches, keeps tokens in a connector
+rather than the Sprite, and says in its `description` what it costs. The privacy rules below
+apply to a published profile too.
+
+## Change sprite-profiles itself
+
+Bug reports and pull requests are welcome. [AGENTS.md](AGENTS.md) has how to run and check
+the code, for people as much as for agents.
+
+### Before you open a pull request
 
 ```sh
 mix format --check-formatted

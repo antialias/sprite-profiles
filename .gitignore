@@ -41,7 +41,7 @@ npm-debug.log
 .env.*
 secrets/
 
-# A set pinned by `mix profiles.lock` (README, "Use a published profile").
+# A set pinned by `sprite-profiles lock` (docs/USING.md, "By address").
 /sprite-profiles.lock
 
 # Binaries built by Burrito (`MIX_ENV=prod mix release`).

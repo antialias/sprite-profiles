@@ -1,0 +1,51 @@
+name: Add a profile to the gallery
+description: You published a profile; list it in the README's gallery.
+title: "Gallery: @owner/name"
+labels: ["gallery"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for publishing a profile. We add it to the gallery once `sprite-profiles show`
+        resolves it and the answers below match what it declares. Leave out tokens, hostnames
+        of private servers and anything else that shouldn't be public.
+  - type: input
+    id: pick
+    attributes:
+      label: Pick
+      description: How people pick it.
+      placeholder: "@acme/linear"
+    validations:
+      required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Repository URL
+      placeholder: "https://github.com/acme/sprite-profile-linear"
+    validations:
+      required: true
+  - type: textarea
+    id: gives
+    attributes:
+      label: What it gives a Sprite
+      description: One or two sentences, for the gallery's table.
+      placeholder: "Linear's MCP server through a connector; no token in the Sprite"
+    validations:
+      required: true
+  - type: textarea
+    id: touches
+    attributes:
+      label: What it can touch
+      description: >-
+        Its connectors and endpoints, the domains it allows, whether it runs a setup.sh, and
+        whether it is privileged. Pasting the output of `sprite-profiles show <pick>` is fine.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: published
+    attributes:
+      label: Published
+      options:
+        - label: The repository is tagged with a version and has the `sprite-profile` topic.
+          required: true

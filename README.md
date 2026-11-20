@@ -80,8 +80,9 @@ before it runs.
 | [`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) | Claude Code through [Apiary](https://apiary.wtf)'s switch proxy, the Sprite enrolled as a device you approve | antialias |
 
 [Browse the `sprite-profile` topic](https://github.com/topics/sprite-profile) on GitHub, or
-run `sprite-profiles search`. Published one? [Add yours](../../issues/new?template=add-profile.yml)
-to this table. Missing one? [Ask for it](../../issues/new?template=request-profile.yml).
+run `sprite-profiles search`. Published one?
+[Add yours](../../issues/new?template=add-profile.yml) to this table. Missing one?
+[Ask for it](../../issues/new?template=request-profile.yml).
 
 ### Publish yours in three steps
 

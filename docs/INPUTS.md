@@ -68,5 +68,5 @@ fixes it.
 
 The bundled `anthropic` and the published
 [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory) work
-the same way, for Anthropic's API and a shop's MCP server. [SPEC.md](SPEC.md#connecting-a-companys-api)
-has the connector fields.
+the same way, for Anthropic's API and a shop's MCP server.
+[SPEC.md](SPEC.md#connecting-a-companys-api) has the connector fields.
