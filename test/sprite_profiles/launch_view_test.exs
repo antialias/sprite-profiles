@@ -143,6 +143,15 @@ defmodule SpriteProfiles.LaunchViewTest do
     assert String.length(String.replace(line, ~r/\e\[\d+m/, "")) == 39
   end
 
+  test "a descriptor's target counts as a terminal by its /dev name, from /proc or lsof" do
+    alias SpriteProfiles.Commands.Launch
+    assert Launch.terminal_name?("/dev/pts/3")
+    assert Launch.terminal_name?("p4242\nf1\nn/dev/ttys003\n")
+    refute Launch.terminal_name?("pipe:[81723]")
+    refute Launch.terminal_name?("p4242\nf1\nn->0x5f1c2a\n")
+    refute Launch.terminal_name?("/dev/null")
+  end
+
   describe "a failure" do
     defp failing(lines, terminal) do
       record = %{@record | error: %{step: :setup, profile: "claude-code", message: "exited 1: x"}}

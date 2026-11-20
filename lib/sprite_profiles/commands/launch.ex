@@ -141,17 +141,66 @@ defmodule SpriteProfiles.Commands.Launch do
     {callbacks, report}
   end
 
-  @doc "True when stdout is a terminal that can take cursor movement."
+  @doc """
+  True when stdout is a terminal that can take cursor movement. The packaged binary's
+  wrapper (Burrito, which sets `__BURRITO=1`) pipes our stdout through itself, so there
+  the answer is whether the wrapper's own stdout is a terminal.
+  """
   def terminal? do
-    Keyword.get(:io.getopts(:standard_io), :stdout, false) == true and
-      System.get_env("TERM") != "dumb"
+    System.get_env("TERM") != "dumb" and
+      (Keyword.get(:io.getopts(:standard_io), :stdout, false) == true or
+         (System.get_env("__BURRITO") == "1" and parent_stdout_terminal?()))
+  end
+
+  @doc "Whether a file descriptor's target, as `/proc` or `lsof -Fn` names it, is a terminal."
+  @spec terminal_name?(String.t()) :: boolean()
+  def terminal_name?(name), do: name =~ ~r{(^|\n)n?/dev/(tty|pts/)}
+
+  defp parent_stdout_terminal? do
+    with {out, 0} <- System.cmd("ps", ["-o", "ppid=", "-p", to_string(:os.getpid())]),
+         ppid = String.trim(out),
+         true <- ppid != "" do
+      case File.read_link("/proc/#{ppid}/fd/1") do
+        {:ok, target} ->
+          terminal_name?(target)
+
+        _ ->
+          case System.cmd("lsof", ["-a", "-p", ppid, "-d", "1", "-Fn"], stderr_to_stdout: true) do
+            {listing, 0} -> terminal_name?(listing)
+            _ -> false
+          end
+      end
+    else
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 
   defp columns do
     case :io.columns() do
       {:ok, n} when n > 20 -> n
-      _ -> 100
+      _ -> tty_columns() || 100
     end
+  end
+
+  # The terminal's width when stdout is a pipe to it (the packaged binary): ask the tty.
+  defp tty_columns do
+    case System.cmd("sh", ["-c", "stty size </dev/tty"], stderr_to_stdout: true) do
+      {out, 0} ->
+        case String.split(out) do
+          [_rows, cols] ->
+            with({n, ""} when n > 20 <- Integer.parse(cols), do: n, else: (_ -> nil))
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
   end
 
   defp resolve_opts(opts) do
