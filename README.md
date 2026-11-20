@@ -1,6 +1,4 @@
-<p align="center"><img src="docs/banner.png" alt="sprite-profiles" width="100%"></p>
-
-# sprite-profiles
+<p align="center"><img src="docs/banner.jpg" alt="sprite-profiles" width="100%"></p>
 
 Pick a few profiles, and a fresh [Fly.io Sprite](https://sprites.dev) gets all of them,
 merged by rules that refuse rather than guess.
@@ -112,16 +110,17 @@ a Sprite also needs the [`sprite` command](https://docs.sprites.dev), signed in.
 ```sh
 mv sprite-profiles-macos_arm64 /usr/local/bin/sprite-profiles
 chmod +x /usr/local/bin/sprite-profiles
-xattr -d com.apple.quarantine /usr/local/bin/sprite-profiles   # macOS: the binary is not notarized
+# macOS: the binary is not notarized
+xattr -d com.apple.quarantine /usr/local/bin/sprite-profiles
 ```
 
 Planning needs no Sprite and no token, and the bundled profiles ship inside the binary:
 
 ```sh
-sprite-profiles plan claude-code playwright          # what a Sprite would get, and from whom
-sprite-profiles search shop                          # published profiles on GitHub
+sprite-profiles plan claude-code playwright      # what a Sprite would get
+sprite-profiles search shop                      # published profiles
 sprite-profiles launch claude-code playwright --name demo
-sprite-profiles exec demo claude -p "Say hello."     # run something inside
+sprite-profiles exec demo claude -p "Say hello." # run it inside
 ```
 
 | bundled profile | gives a Sprite |
