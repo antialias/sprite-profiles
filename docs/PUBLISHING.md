@@ -35,12 +35,11 @@ Then [add it to the gallery](../../../issues/new?template=add-profile.yml) in th
 ## Check it before you tag
 
 `sprite-profiles show @owner/NAME@main` resolves a pushed branch as a launch would and prints
-what the profile can touch. A path pick must be a folder named for the profile, so a
-checkout named `sprite-profile-NAME` is refused with `name_mismatch`; check it through a link
-with the profile's name:
+what the profile can touch. Before you push, check the checkout itself: a folder named
+`sprite-profile-NAME` holds profile NAME (from 0.3.1).
 
 ```sh
-ln -sfn "$PWD" /tmp/NAME && sprite-profiles show /tmp/NAME && sprite-profiles plan claude-code /tmp/NAME
+sprite-profiles show ./ && sprite-profiles plan claude-code ./
 ```
 
 ## Labels and connectors follow the publisher
