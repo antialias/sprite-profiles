@@ -336,7 +336,8 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert err =~ "[needs_terminal]"
   end
 
-  test "a launch prints its steps and summary, and ends with the ✓ line", %{tmp_dir: tmp} do
+  test "a --verbose launch prints its steps and summary, and ends with the ✓ line",
+       %{tmp_dir: tmp} do
     {sprites, _log} = FakeSprites.start()
     test = self()
 
@@ -350,7 +351,8 @@ defmodule SpriteProfiles.CLICommandsTest do
       dirs: [@profiles],
       name: "demo-1",
       sprites: sprites,
-      state_dir: Path.join(tmp, "launches")
+      state_dir: Path.join(tmp, "launches"),
+      verbose: true
     ]
 
     assert Commands.Launch.run(["preview"], opts, out) == 0
@@ -358,11 +360,14 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert hd(lines) == "Launching preview"
     assert Enum.any?(lines, &(&1 =~ "Sprite:     demo-1"))
 
+    assert Enum.any?(lines, &(&1 =~ ~r/^  create +\d+\.\d\d s  labels set at create/))
+
     assert List.last(lines) =~
              ~r/^✓ demo-1: 1 profile · 0 connectors admitted · checkpointed · \d+\.\d s$/
   end
 
-  test "a launch prints setup.sh's lines as they come, before its step line", %{tmp_dir: tmp} do
+  test "a --verbose launch prints setup.sh's lines as they come, before its step line",
+       %{tmp_dir: tmp} do
     respond = fn
       {:exec, [_, ["bash", "-c", s], opts]} ->
         if s =~ "run-setup.sh\" " do
@@ -392,7 +397,8 @@ defmodule SpriteProfiles.CLICommandsTest do
       dirs: [@profiles],
       name: "demo-1",
       sprites: sprites,
-      state_dir: Path.join(tmp, "launches")
+      state_dir: Path.join(tmp, "launches"),
+      verbose: true
     ]
 
     assert Commands.Launch.run(["claude-code"], opts, out) == 0
@@ -410,7 +416,7 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert step =~ ~r/^\s+\d+\.\d\d s  enter ABCD-1234$/
   end
 
-  test "a failed setup.sh ends the launch with its error and how to destroy the Sprite",
+  test "a failed setup.sh ends a --verbose launch with its error and how to destroy the Sprite",
        %{tmp_dir: tmp} do
     respond = fn
       {:exec, [_, ["bash", "-c", s], _opts]} ->
@@ -431,12 +437,283 @@ defmodule SpriteProfiles.CLICommandsTest do
       usage: & &1
     }
 
-    opts = [dirs: [@profiles], name: "demo-1", sprites: sprites, state_dir: Path.join(tmp, "l")]
+    opts = [
+      dirs: [@profiles],
+      name: "demo-1",
+      sprites: sprites,
+      state_dir: Path.join(tmp, "l"),
+      verbose: true
+    ]
 
     assert Commands.Launch.run(["claude-code"], opts, out) == 1
     errors = for {:error, l} <- Process.info(self(), :messages) |> elem(1), do: l
     assert Enum.any?(errors, &(&1 =~ "Failed at setup claude-code"))
     assert Enum.any?(errors, &(&1 =~ "destroy it with: sprite destroy --force demo-1"))
+  end
+
+  ## the compact launch output, the default
+
+  # A project profile beside the bundled ones, picked by path as `./weekend`.
+  @weekend """
+  name    = "weekend"
+  summary = "A test project's task and permissions"
+
+  [claude.settings.permissions]
+  allow = ["Skill", "mcp__github", "Edit(~/site/**)"]
+  """
+
+  @connectors [
+    %{
+      id: "conn_a",
+      provider: "custom_api",
+      name: "anthropic",
+      allow_all: false,
+      sprite_labels: ["profile:anthropic"],
+      name_prefix: nil,
+      allowed_endpoints: ["/v1/*"],
+      blocked_endpoints: [],
+      base_url: "https://api.anthropic.com"
+    },
+    %{
+      id: "conn_g",
+      provider: "custom_api",
+      name: "github-mcp",
+      allow_all: false,
+      sprite_labels: ["profile:github-mcp"],
+      name_prefix: nil,
+      allowed_endpoints: ["/mcp/"],
+      blocked_endpoints: [],
+      base_url: "https://api.githubcopilot.com"
+    }
+  ]
+
+  # A fake launch through the command; returns {status, ops}, each op {:info | :error |
+  # :write, text} in the order written. `setup` answers a profile's setup.sh run.
+  defp compact_launch(picks, tmp, extra, setup \\ fn _p, _on_output -> :default end) do
+    weekend = Path.join(tmp, "weekend")
+    File.mkdir_p!(Path.join(weekend, "claude/skills/weekend-page"))
+    File.write!(Path.join(weekend, "profile.toml"), @weekend)
+
+    File.write!(
+      Path.join(weekend, "claude/skills/weekend-page/SKILL.md"),
+      "---\nname: weekend-page\ndescription: Build the weekend page.\n---\n\nBuild it.\n"
+    )
+
+    respond = fn
+      {:list_connectors, []} ->
+        {:ok, @connectors}
+
+      {:exec, [_, ["bash", "-c", s], opts]} ->
+        case Regex.run(~r/run-setup\.sh" '([^']+)'/, s) do
+          [_, p] -> setup.(p, opts[:on_output])
+          nil -> :default
+        end
+
+      _ ->
+        :default
+    end
+
+    {sprites, _log} = FakeSprites.start(respond)
+    test = self()
+
+    out = %SpriteProfiles.Out{
+      info: &send(test, {:op, {:info, &1}}),
+      error: &send(test, {:op, {:error, &1}}),
+      write: &send(test, {:op, {:write, &1}}),
+      usage: & &1
+    }
+
+    opts =
+      Keyword.merge(
+        [
+          dirs: [@profiles],
+          set_opts: [base: tmp],
+          name: "demo",
+          sprites: sprites,
+          state_dir: Path.join(tmp, "launches"),
+          terminal?: fn -> false end
+        ],
+        extra
+      )
+
+    status = Commands.Launch.run(picks, opts, out)
+    {status, ops()}
+  end
+
+  # The ops written so far, taken out of the mailbox.
+  defp ops do
+    receive do
+      {:op, op} -> [op | ops()]
+    after
+      0 -> []
+    end
+  end
+
+  @seven ~w(claude-code anthropic github-mcp playwright preview ./weekend)
+
+  test "a launch prints a line for the Sprite, one per profile, and the last line with the URL",
+       %{tmp_dir: tmp} do
+    {0, ops} = compact_launch(@seven, tmp, [])
+    lines = for {:info, l} <- ops, do: l
+    assert for({kind, _} <- ops, kind != :info, do: kind) == []
+
+    # Every line but the last two is "✓ <pick, padded> <time> s  <what it added>".
+    shape = ~r/^✓ (\S+(?: \S+)?) +\d+\.\d s  (.+)$/
+    # The fake's setup.sh prints "ok": shown, indented, before its profile's line.
+    assert Enum.count(lines, &(&1 == "    ok")) == 2
+    rows = for l <- Enum.drop(lines, -2), l != "    ok", do: tl(Regex.run(shape, l))
+
+    assert rows == [
+             ["Sprite demo", "2 connectors admitted · network policy · 6 env vars"],
+             ["claude-code", "setup · MCP context7 · hooks · 1 setting · 1 skill · 1 file"],
+             ["anthropic", "connector api.anthropic.com"],
+             ["github-mcp", "connector api.githubcopilot.com · MCP github · 1 skill"],
+             ["playwright", "setup · 1 file"],
+             ["preview", "service preview :8080 · 1 file"],
+             ["./weekend", "3 permissions · 1 skill"]
+           ]
+
+    # one column for the times, every line under 100 columns
+    assert lines
+           |> Enum.drop(-2)
+           |> Enum.reject(&(&1 == "    ok"))
+           |> Enum.map(&:binary.match(&1, " s  "))
+           |> Enum.uniq()
+           |> length() == 1
+
+    assert Enum.all?(lines, &(String.length(&1) < 100))
+
+    assert [done, "  url"] = Enum.take(lines, -2)
+    assert done =~ ~r/^✓ demo: 6 profiles · 2 connectors admitted · checkpointed · \d+\.\d s$/
+    refute Enum.any?(lines, &(&1 =~ ~r/^(Launching|Sources:|Sprite: )/))
+  end
+
+  test "setup.sh's output shows while it runs: a region erased on a terminal, plain lines elsewhere",
+       %{tmp_dir: tmp} do
+    setup = fn
+      "claude-code", on_output ->
+        on_output.("Open https://example/device\nenter ")
+        on_output.("\e[1mABCD-1234\e[0m\n")
+        {:streamed, {:ok, %{status: 0, output: "Open https://example/device\nenter ABCD-1234\n"}}}
+
+      _, _ ->
+        :default
+    end
+
+    {0, piped} = compact_launch(["claude-code", "preview"], tmp, [], setup)
+    texts = Enum.map(piped, &elem(&1, 1))
+    i = Enum.find_index(texts, &(&1 == "    Open https://example/device"))
+    assert ["    enter ABCD-1234", "✓ claude-code" <> _] = Enum.slice(texts, i + 1, 2)
+    refute Enum.any?(texts, &(&1 =~ "\e"))
+
+    {0, tty} =
+      compact_launch(
+        ["claude-code", "preview"],
+        tmp,
+        [terminal?: fn -> true end, columns: 80],
+        setup
+      )
+
+    erase = "\e[1A\e[2K"
+    i = Enum.find_index(tty, &match?({:info, "✓ claude-code" <> _}, &1))
+
+    assert [
+             {:info,
+              "… claude-code\n\e[2m    Open https://example/device\e[0m\n\e[2m    enter ABCD-1234\e[0m"},
+             {:write, ^erase <> ^erase <> ^erase}
+           ] = Enum.slice(tty, i - 2, 2)
+
+    assert {:info, "… Sprite demo"} = hd(tty)
+    refute Enum.any?(tty, fn {_, t} -> t =~ "\e[J" or t =~ "\e[0J" end)
+  end
+
+  test "a failed setup.sh: the ✗ line, its output, and how to destroy the Sprite",
+       %{tmp_dir: tmp} do
+    setup = fn
+      "claude-code", on_output ->
+        on_output.("Waiting for sign-in\nthe code expired\n")
+        {:streamed, {:ok, %{status: 1, output: "Waiting for sign-in\nthe code expired\n"}}}
+
+      _, _ ->
+        :default
+    end
+
+    {1, ops} = compact_launch(["claude-code", "preview"], tmp, [terminal?: fn -> true end], setup)
+    errors = for {:error, l} <- ops, do: l
+
+    assert [
+             "✗ claude-code" <> failed,
+             "    Waiting for sign-in",
+             "    the code expired",
+             "The Sprite demo was left as it is; destroy it with: sprite destroy --force demo"
+           ] = errors
+
+    assert failed =~ ~r/^ +\d+\.\d s  setup\.sh exited 1$/
+    refute Enum.any?(ops, &match?({:info, "✓ claude-code" <> _}, &1))
+    refute Enum.any?(ops, &match?({:info, "✓ demo" <> _}, &1))
+  end
+
+  test "the Task hold line is gone from setup.sh's output, in every mode" do
+    script = SpriteProfiles.Launcher.runner_script()
+    refute script =~ "Task hold:"
+    assert script =~ ~s(hold >/dev/null 2>&1\n)
+  end
+
+  ## exec
+
+  defp exec(argv, answer) do
+    test = self()
+
+    respond = fn
+      {:exec, [_name, argv, opts]} ->
+        send(test, {:argv, argv})
+        answer.(opts[:on_output])
+
+      _ ->
+        :default
+    end
+
+    {sprites, _log} = FakeSprites.start(respond)
+    run(["exec" | argv], exec: [sprites: sprites])
+  end
+
+  test "exec runs the command in a login shell, each argument quoted as it is" do
+    {0, "", ""} =
+      exec(["demo", "claude", "-p", ~s(Build the "weekend" page, it's due.)], fn _ ->
+        {:ok, %{status: 0, output: ""}}
+      end)
+
+    assert_received {:argv, ["bash", "-lc", script]}
+    assert script == ~S('claude' '-p' 'Build the "weekend" page, it'\''s due.')
+
+    {0, "", ""} =
+      exec(["demo", "--", "ls", "--", "-la"], fn _ -> {:ok, %{status: 0, output: ""}} end)
+
+    assert_received {:argv, ["bash", "-lc", "'ls' '--' '-la'"]}
+  end
+
+  test "exec streams the output without the image's bind warnings, and passes the status on" do
+    bind = "/home/sprite/.bashrc: line 22: bind: warning: line editing not enabled"
+
+    {3, out, ""} =
+      exec(["demo", "sh", "-c", "exit 3"], fn on_output ->
+        on_output.(bind <> "\n/home/sprite/.bashrc: line 23: bind: warn")
+        on_output.("ing: line editing not enabled\nfirst line\nbind: warning: line editing")
+        on_output.(" not enabled\nlast, no newline")
+        {:streamed, {:ok, %{status: 3, output: "…"}}}
+      end)
+
+    assert out ==
+             "first line\nbind: warning: line editing not enabled\nlast, no newline"
+  end
+
+  test "exec without a command is bad usage" do
+    {2, "", err} = run(["exec", "demo"])
+    assert err =~ "usage: sprite-profiles exec"
+    assert err =~ "name the command to run"
+    {2, "", _} = run(["exec"])
+    {0, help, ""} = run(["help", "exec"])
+    assert help =~ "bash -lc"
   end
 
   test "the launch summary ends with one line for a recording" do

@@ -235,13 +235,42 @@ You need the [`sprite` CLI](https://docs.fly.io/sprites/quickstart.md), logged i
 launcher runs it for you and never reads or prints your token.
 
 ```sh
-mix profiles.launch -p claude-code -p preview --name demo-1
-sprite exec -s demo-1 -- claude mcp list       # look inside
-sprite checkpoint list -s demo-1
-sprite destroy --force demo-1                   # when you're done
+sprite-profiles launch claude-code anthropic github-mcp playwright preview ./weekend --name demo
+sprite-profiles exec demo claude -p "Build the weekend page."   # run something inside
+sprite checkpoint list -s demo
+sprite destroy --force demo                                      # when you're done
 ```
 
-The launcher prints each step's time as it goes:
+It prints a line for the Sprite, then one per profile as it finishes, with the time it
+took and what it added, then the last line with the Sprite's URL:
+
+```
+✓ Sprite demo    1.9 s  2 connectors admitted · network policy · 6 env vars
+✓ claude-code    4.6 s  setup · MCP context7 · hooks · 1 setting · 1 skill · 1 file
+✓ anthropic      0.3 s  connector api.anthropic.com
+✓ github-mcp     1.6 s  connector api.githubcopilot.com · MCP github · 1 skill
+✓ playwright    41.0 s  setup · 1 file
+✓ preview        5.8 s  service preview :8080 · 1 file
+✓ ./weekend      1.3 s  9 permissions · 1 skill
+✓ demo: 6 profiles · 2 connectors admitted · checkpointed · 57.9 s
+  https://demo-b6mfx.sprites.app
+```
+
+While a profile's `setup.sh` runs, its output shows under a `… <profile>` line (the last
+ten lines, dimmed), so you can act on what it asks, such as a sign-in's address and code;
+when it finishes, those lines give way to the profile's ✓ line. When the output is not a
+terminal (a pipe, an agent), nothing is erased: the setup lines are printed indented, then
+the ✓ line. A failed step prints a ✗ line with its error and its last 20 lines of output,
+and how to destroy the Sprite. `--verbose` prints every step with its time instead, the
+setup output as it comes, and a summary (labels, checkpoint id, the launch record's path).
+
+`sprite-profiles exec NAME CMD [ARG ...]` runs a command in the Sprite in a login shell, so
+the profiles' env and shell hooks apply, with each argument passed as it is. It prints the
+output as it comes and exits with the command's status; standard input is not passed on.
+Everything after NAME belongs to the command, options and all.
+
+The launch, step by step (`mix profiles.launch -p claude-code -p preview` does the same
+from a checkout):
 
 1. Merge the set, and refuse before any API call.
 2. If the set needs a connector, check that one in the org admits it.

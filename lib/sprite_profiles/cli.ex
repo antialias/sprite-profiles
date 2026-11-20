@@ -7,6 +7,7 @@ defmodule SpriteProfiles.CLI do
       sprite-profiles show @acme/linear
       sprite-profiles plan claude-code github
       sprite-profiles launch claude-code github --name demo
+      sprite-profiles exec demo claude -p "Build the weekend page."
       sprite-profiles add claude-code @acme/linear && sprite-profiles lock
       sprite-profiles --version
 
@@ -49,6 +50,8 @@ defmodule SpriteProfiles.CLI do
                         sprite-profiles plan claude-code github
     launch PICK...    create a Sprite and apply the profiles (--dry-run: plan only)
                         sprite-profiles launch claude-code github --name demo
+    exec NAME CMD...  run a command in a launched Sprite, with the profiles' env
+                        sprite-profiles exec demo claude -p "Build the weekend page."
     connect PICK      create a profile's connector in your org; you type its token
                         sprite-profiles connect github-mcp
     add PICK...       add profiles to this folder's sprite-profiles.toml
@@ -122,16 +125,18 @@ defmodule SpriteProfiles.CLI do
         adapter: :string,
         lock: :string,
         offline: :boolean,
-        input: :keep
+        input: :keep,
+        verbose: :boolean
       ],
       aliases: [p: :profile, i: :input],
       help:
         """
-        usage: sprite-profiles launch [PICK ...] [--name N] [-i NAME=VALUE ...] [--lock FILE] [--dry-run] ...
+        usage: sprite-profiles launch [PICK ...] [--name N] [-i NAME=VALUE ...] [--lock FILE] [--dry-run] [--verbose] ...
 
         Creates a Sprite, applies the profiles to it in order, checkpoints it, then applies
-        privileged profiles. Prints each step as it finishes, then a summary. Uses the
-        installed, logged-in `sprite` CLI.
+        privileged profiles. Prints a line for the Sprite and one per profile, with its time
+        and what it added; a setup.sh's output shows while it runs. Uses the installed,
+        logged-in `sprite` CLI.
 
         """ <>
           @set_help <>
@@ -144,6 +149,8 @@ defmodule SpriteProfiles.CLI do
             --lock FILE           launch the set pinned in a lock file
             --offline             fetch nothing: published picks must be locked and cached
             --destroy-on-failure  destroy the Sprite if a step after its creation fails
+            --verbose             print every step and its time, setup.sh's output as it
+                                  comes, and a summary
             --secrets-dir DIR     where privileged profiles' secrets are read from
                                   (default ~/.config/sprite-profiles/secrets)
             --adapter cli|api     the sprite CLI (default) or the REST API with SPRITES_TOKEN
@@ -152,6 +159,25 @@ defmodule SpriteProfiles.CLI do
           example:
             sprite-profiles launch claude-code github --name demo --dry-run
           """
+    },
+    "exec" => %{
+      switches: [adapter: :string],
+      aliases: [],
+      help: """
+      usage: sprite-profiles exec [--adapter cli|api] NAME [--] CMD [ARG ...]
+
+      Runs a command in a launched Sprite as a login shell would (bash -lc), so the
+      profiles' env file and shell hooks apply. Prints its output as it comes, stdout and
+      stderr together, without the image's "bind: warning: line editing not enabled"
+      lines, and exits with the command's status. Standard input is not passed on. Each
+      ARG reaches the command as it is; to run a shell line, run bash -c 'LINE'.
+
+      options:
+        --adapter cli|api   the sprite CLI (default) or the REST API with SPRITES_TOKEN
+
+      example:
+        sprite-profiles exec demo claude -p "Build the weekend page."
+      """
     },
     "lock" => %{
       switches: [profile: :keep, output: :string, dir: :keep, input: :keep],
@@ -284,7 +310,8 @@ defmodule SpriteProfiles.CLI do
   @doc """
   Runs the command for `argv` and returns its exit status. `ctx` is for tests: `:cwd`
   (where `sprite-profiles.toml` is looked for; default the working directory) and
-  `:connect` (the terminal and Sprites handle of `SpriteProfiles.Commands.Connect.run/4`).
+  `:connect` (the terminal and Sprites handle of `SpriteProfiles.Commands.Connect.run/4`)
+  and `:exec` (options for `SpriteProfiles.Commands.Exec.run/4`, such as `:sprites`).
   """
   @spec main([String.t()], keyword()) :: non_neg_integer()
   def main(argv, ctx \\ []) do
@@ -357,6 +384,38 @@ defmodule SpriteProfiles.CLI do
 
   ## parsing
 
+  # exec's arguments after NAME are the command's, options and all.
+  defp command("exec", argv, spec, ctx) do
+    out = Out.io(spec.help)
+
+    case OptionParser.parse_head(argv,
+           strict: spec.switches ++ [help: :boolean],
+           aliases: [h: :help]
+         ) do
+      {opts, rest, []} ->
+        case {opts[:help], rest} do
+          {true, _} ->
+            IO.write(spec.help)
+            0
+
+          {_, []} ->
+            Out.usage(out, "name the Sprite and the command to run")
+
+          {_, [name, "--" | cmd]} when cmd != [] ->
+            exec(name, cmd, opts, out, ctx)
+
+          {_, [name | cmd]} when cmd not in [[], ["--"]] ->
+            exec(name, cmd, opts, out, ctx)
+
+          _ ->
+            Out.usage(out, "name the command to run")
+        end
+
+      {_, _, invalid} ->
+        Out.usage(out, "not understood: " <> Enum.map_join(invalid, " ", &elem(&1, 0)))
+    end
+  end
+
   defp command(cmd, argv, spec, ctx) do
     out = Out.io(spec.help)
     switches = spec.switches ++ [help: :boolean]
@@ -408,7 +467,14 @@ defmodule SpriteProfiles.CLI do
     with {:ok, picks, set_opts, _file} <- the_set(opts, out, ctx) do
       command_opts =
         [dirs: dirs(opts), set_opts: set_opts] ++
-          Keyword.take(opts, [:name, :dry_run, :destroy_on_failure, :secrets_dir, :adapter])
+          Keyword.take(opts, [
+            :name,
+            :dry_run,
+            :destroy_on_failure,
+            :secrets_dir,
+            :adapter,
+            :verbose
+          ])
 
       Commands.Launch.run(picks, command_opts, out)
     end
@@ -478,6 +544,9 @@ defmodule SpriteProfiles.CLI do
       picks -> remove(picks, out, ProjectFile.path(ctx[:cwd]))
     end
   end
+
+  defp exec(name, cmd, opts, out, ctx),
+    do: Commands.Exec.run(name, cmd, Keyword.take(opts, [:adapter]) ++ (ctx[:exec] || []), out)
 
   defp dirs(opts), do: search_path(Keyword.get_values(opts, :dir))
 

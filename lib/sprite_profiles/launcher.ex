@@ -87,6 +87,12 @@ defmodule SpriteProfiles.Launcher do
       prints it: complete lines only (a partial one waits for its newline or the end),
       without control sequences or carriage returns
     * `:on_resolved` - `fun(plan)`, called once the set is resolved, before any API call
+    * `:on_begin` - `fun(%{name: name, plan: plan, profiles: profiles})`, called once just
+      after `:on_resolved`, with the Sprite's name and the resolved `SpriteProfiles.Profile`s
+      in plan order
+    * `:on_start` - `fun(%{step: kind, profile: name_or_nil})`, called as each step starts,
+      before it is known whether it has anything to do (a step with nothing to do is never
+      passed to `:on_step`)
   """
   def launch(names, opts) do
     sprites = Keyword.fetch!(opts, :sprites)
@@ -94,12 +100,19 @@ defmodule SpriteProfiles.Launcher do
     with {:ok, plan, profiles, secrets} <- resolve(names, opts) do
       name = opts[:name] || default_name(plan)
       Keyword.get(opts, :on_resolved, fn _ -> :ok end).(plan)
+      by_name = Map.new(profiles, &{&1.qualified, &1})
+
+      Keyword.get(opts, :on_begin, fn _ -> :ok end).(%{
+        name: name,
+        plan: plan,
+        profiles: Enum.map(plan.profiles, &Map.fetch!(by_name, &1))
+      })
 
       state = %{
         sprites: sprites,
         name: name,
         plan: plan,
-        profiles: Map.new(profiles, &{&1.qualified, &1}),
+        profiles: by_name,
         secrets: secrets,
         connector_env: %{},
         phase_env: %{},
@@ -110,6 +123,7 @@ defmodule SpriteProfiles.Launcher do
         created: false,
         steps: [],
         on_step: Keyword.get(opts, :on_step, fn _ -> :ok end),
+        on_start: Keyword.get(opts, :on_start, fn _ -> :ok end),
         on_output: opts[:on_output],
         started_at: DateTime.utc_now()
       }
@@ -153,6 +167,7 @@ defmodule SpriteProfiles.Launcher do
 
   defp run_steps(state, steps) do
     Enum.reduce_while(steps, {:ok, state}, fn {kind, profile, arg}, {:ok, state} ->
+      state.on_start.(%{step: kind, profile: profile})
       t0 = System.monotonic_time(:millisecond)
 
       case step(kind, profile, arg, state) do
@@ -617,8 +632,7 @@ defmodule SpriteProfiles.Launcher do
       sprite-env curl -s -X PUT "/v1/tasks/$task" \
         -H 'Content-Type: application/json' -d '{"expire":"3m"}'
     }
-    held="$(hold 2>&1)"
-    echo "[profiled] Task hold: $held"
+    hold >/dev/null 2>&1
     ( while sleep 60; do hold >/dev/null 2>&1; done ) >/dev/null 2>&1 &
     beat=$!
 

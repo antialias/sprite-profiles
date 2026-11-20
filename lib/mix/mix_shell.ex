@@ -12,6 +12,8 @@ defmodule SpriteProfiles.MixShell do
     %Out{
       info: fn line -> Mix.shell().info(line) end,
       error: fn line -> Mix.shell().error(line) end,
+      # Mix.Shell.IO writes to standard_io too; it has no call that adds no newline.
+      write: &IO.write/1,
       usage: fn message ->
         Mix.shell().error(usage <> if(message == "", do: "", else: "\n" <> message))
       end

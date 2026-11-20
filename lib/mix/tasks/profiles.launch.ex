@@ -3,8 +3,9 @@ defmodule Mix.Tasks.Profiles.Launch do
 
   @moduledoc """
   Creates a Fly.io Sprite, applies a set of profiles to it, checkpoints it as
-  `profiled: <set>`, then applies privileged profiles. Prints each step's time as it goes and
-  writes a launch record under `~/.local/state/sprite-profiles/launches/`.
+  `profiled: <set>`, then applies privileged profiles. Prints a line for the Sprite and one
+  per profile as each finishes (`--verbose`: every step's time, and a summary), and writes a
+  launch record under `~/.local/state/sprite-profiles/launches/`.
 
       mix profiles.launch --profile claude-code --profile preview --name demo-1
       mix profiles.launch -p claude-code -p github --dry-run
@@ -25,6 +26,8 @@ defmodule Mix.Tasks.Profiles.Launch do
     * `--name` - the Sprite's name (default: the picks joined by '-', then 4 hex digits)
     * `--dry-run` - resolve the set and print the plan; create nothing
     * `--destroy-on-failure` - destroy the Sprite if a step after its creation fails
+    * `--verbose` - print every step as it finishes, setup.sh's output as it comes, and a
+      summary, instead of one line per profile
     * `--dir` - a folder holding profiles; repeat it to search several (default: `profiles`
       plus `~/.config/sprite-profiles/profiles` when it exists, or `SPRITE_PROFILES_PATH`)
     * `--secrets-dir` - where privileged profiles' secrets are read from (default
@@ -50,11 +53,12 @@ defmodule Mix.Tasks.Profiles.Launch do
     adapter: :string,
     lock: :string,
     offline: :boolean,
-    input: :keep
+    input: :keep,
+    verbose: :boolean
   ]
   @aliases [p: :profile, i: :input]
 
-  @usage "usage: mix profiles.launch (--profile PICK [--profile PICK ...] [-i NAME=VALUE ...] | --lock FILE) [--offline] [--name N] [--dry-run] [--destroy-on-failure] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]"
+  @usage "usage: mix profiles.launch (--profile PICK [--profile PICK ...] [-i NAME=VALUE ...] | --lock FILE) [--offline] [--name N] [--dry-run] [--destroy-on-failure] [--verbose] [--dir DIR ...] [--secrets-dir DIR] [--adapter cli|api]"
 
   @impl Mix.Task
   def run(argv) do
@@ -76,7 +80,8 @@ defmodule Mix.Tasks.Profiles.Launch do
                     :dry_run,
                     :destroy_on_failure,
                     :secrets_dir,
-                    :adapter
+                    :adapter,
+                    :verbose
                   ])
 
               Commands.Launch.run(picks, command_opts, out)

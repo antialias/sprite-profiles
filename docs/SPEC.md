@@ -527,7 +527,9 @@ another language should do the same, in this order:
      stderr together) is shown live, a line at a time as each line ends, so a person can
      act on what it asks while the launch waits (a device sign-in's address and code).
      Control sequences and carriage returns are removed from each line first, so a
-     Sprite cannot redraw the launching terminal;
+     Sprite cannot redraw the launching terminal. By default a terminal shows the last
+     ten lines under the profile's name and erases them, line by line, when the script
+     ends; elsewhere they are printed plainly, and `--verbose` prints every one;
    - create its services (`~` in `dir` is expanded), each with that phase's env, the set
      the env file holds. Services come after `setup.sh`, so a service may run what the
      script installed.

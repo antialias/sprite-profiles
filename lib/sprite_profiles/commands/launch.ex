@@ -1,17 +1,23 @@
 defmodule SpriteProfiles.Commands.Launch do
   @moduledoc """
   The launch command, shared by `sprite-profiles launch` and `mix profiles.launch`: resolve
-  a set, then either print its plan (`dry_run`) or create a Sprite and apply it, printing
-  each step as it finishes, each line a `setup.sh` prints as it prints it, and a summary. Returns the exit status: 0, 1 (refused or a step
-  failed) or 2 (bad usage).
+  a set, then either print its plan (`dry_run`) or create a Sprite and apply it. Returns
+  the exit status: 0, 1 (refused or a step failed) or 2 (bad usage).
+
+  By default the output is compact (`SpriteProfiles.LaunchView`): a line for the Sprite,
+  one per profile, and the last line with the URL, with `setup.sh`'s output shown while it
+  runs. With `:verbose`, each step as it finishes, each line a `setup.sh` prints as it
+  prints it, and a summary.
 
   Options: `:dirs` (the search path), `:set_opts` (from `SpriteProfiles.SetArgs.picks/1`:
   `:inputs`, `:offline`, `:pins`), `:name`, `:dry_run`, `:destroy_on_failure`,
-  `:secrets_dir`, `:adapter` (`"cli"` or `"api"`), and for tests `:sprites` (a handle,
-  instead of `:adapter`) and `:state_dir` (where the launch record goes).
+  `:secrets_dir`, `:adapter` (`"cli"` or `"api"`), `:verbose`, and for tests `:sprites` (a
+  handle, instead of `:adapter`), `:state_dir` (where the launch record goes),
+  `:terminal?` (a fun: may the output redraw lines? default: stdout is a terminal) and
+  `:columns` (the terminal's width).
   """
 
-  alias SpriteProfiles.{Launcher, Out, Plan, Sprites}
+  alias SpriteProfiles.{Launcher, LaunchView, Out, Plan, Sprites}
 
   @doc "Runs the command for `picks`; returns the exit status."
   @spec run([String.t()], keyword(), Out.t()) :: non_neg_integer()
@@ -39,27 +45,21 @@ defmodule SpriteProfiles.Commands.Launch do
   end
 
   defp launch(picks, opts, sprites, out) do
+    {callbacks, report} =
+      if opts[:verbose], do: verbose(picks, out), else: compact(opts, out)
+
     launch_opts =
       resolve_opts(opts) ++
-        [
-          sprites: sprites,
-          destroy_on_failure: opts[:destroy_on_failure] || false,
-          on_step: &print_step(out, &1),
-          on_output: &print_output(out, &1, &2),
-          on_resolved: &print_sources(out, &1)
-        ] ++ Keyword.take(opts, [:state_dir])
-
-    Out.info(out, "Launching #{Enum.join(picks, " + ")}")
+        [sprites: sprites, destroy_on_failure: opts[:destroy_on_failure] || false] ++
+        callbacks ++ Keyword.take(opts, [:state_dir])
 
     case Launcher.launch(picks, launch_opts) do
       {:ok, record} ->
-        summary(out, record)
-        Out.info(out, done_line(record))
+        report.({:done, record})
         0
 
       {:error, %{outcome: :failed} = record} ->
-        summary(out, record)
-        Out.error(out, "Failed at #{step_name(record.error)}: #{record.error.message}")
+        report.({:failed, record})
 
         unless opts[:destroy_on_failure] || record.steps == [] do
           Out.error(
@@ -71,7 +71,86 @@ defmodule SpriteProfiles.Commands.Launch do
         1
 
       {:error, problems} ->
+        report.(:abort)
         Out.refused(out, problems)
+    end
+  end
+
+  # Today's output: every step, setup.sh's lines as they come, and a summary.
+  defp verbose(picks, out) do
+    Out.info(out, "Launching #{Enum.join(picks, " + ")}")
+
+    callbacks = [
+      on_step: &print_step(out, &1),
+      on_output: &print_output(out, &1, &2),
+      on_resolved: &print_sources(out, &1)
+    ]
+
+    report = fn
+      {:done, record} ->
+        summary(out, record)
+        Out.info(out, done_line(record))
+
+      {:failed, record} ->
+        summary(out, record)
+        Out.error(out, "Failed at #{step_name(record.error)}: #{record.error.message}")
+
+      :abort ->
+        :ok
+    end
+
+    {callbacks, report}
+  end
+
+  # The compact view: its state in an Agent, since the callbacks come from the launcher.
+  defp compact(opts, out) do
+    terminal? =
+      case Keyword.get(opts, :terminal?, &terminal?/0) do
+        f when is_function(f, 0) -> f.()
+        value -> value == true
+      end
+
+    view = LaunchView.new(terminal: terminal?, columns: opts[:columns] || columns())
+    {:ok, agent} = Agent.start_link(fn -> view end)
+
+    emit = fn event ->
+      agent
+      |> Agent.get_and_update(fn view ->
+        {view, ops} = LaunchView.event(view, event)
+        {ops, view}
+      end)
+      |> Enum.each(fn
+        {:info, text} -> Out.info(out, text)
+        {:error, text} -> Out.error(out, text)
+        {:write, text} -> Out.write(out, text)
+      end)
+    end
+
+    callbacks = [
+      on_begin: &emit.({:begin, &1}),
+      on_start: &emit.({:start, &1}),
+      on_step: &emit.({:step, &1}),
+      on_output: &emit.({:output, &1, &2})
+    ]
+
+    report = fn event ->
+      emit.(event)
+      Agent.stop(agent)
+    end
+
+    {callbacks, report}
+  end
+
+  @doc "True when stdout is a terminal that can take cursor movement."
+  def terminal? do
+    Keyword.get(:io.getopts(:standard_io), :stdout, false) == true and
+      System.get_env("TERM") != "dumb"
+  end
+
+  defp columns do
+    case :io.columns() do
+      {:ok, n} when n > 20 -> n
+      _ -> 100
     end
   end
 
@@ -84,7 +163,10 @@ defmodule SpriteProfiles.Commands.Launch do
     ] ++ Keyword.get(opts, :set_opts, [])
   end
 
-  defp sprites(opts, out) do
+  @doc false
+  # The Sprites handle for `opts`: `:sprites`, or the adapter `:adapter` names. Returns
+  # `{:ok, handle}` or `{:exit, status}`; shared with `SpriteProfiles.Commands.Exec`.
+  def sprites(opts, out) do
     case {opts[:sprites], opts[:adapter] || "cli"} do
       {%Sprites{} = sprites, _} ->
         {:ok, sprites}
@@ -157,19 +239,6 @@ defmodule SpriteProfiles.Commands.Launch do
     """)
   end
 
-  @doc """
-  The last line of a launch that finished, for a recording: no URL and no checkpoint id.
-
-      ✓ demo: 4 profiles · 2 connectors admitted · checkpointed · 14.2 s
-  """
-  def done_line(record) do
-    checkpointed = if record.checkpoint, do: "checkpointed", else: "not checkpointed"
-    total = :erlang.float_to_binary(record.total_ms / 1000, decimals: 1)
-
-    "✓ #{record.name}: #{count(length(record.profiles), "profile")} · " <>
-      "#{count(length(record.connectors), "connector")} admitted · #{checkpointed} · #{total} s"
-  end
-
-  defp count(1, noun), do: "1 #{noun}"
-  defp count(n, noun), do: "#{n} #{noun}s"
+  @doc "The last line of a launch that finished; see `SpriteProfiles.LaunchView.done_line/1`."
+  defdelegate done_line(record), to: LaunchView
 end
