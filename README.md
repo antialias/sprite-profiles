@@ -1,41 +1,106 @@
+<p align="center"><img src="docs/banner.png" alt="sprite-profiles" width="100%"></p>
+
 # sprite-profiles
 
-Composable profiles for [Fly.io Sprites](https://sprites.dev). Pick a few, and a fresh Sprite
-gets all of them, merged by rules that refuse rather than guess.
+Pick a few profiles, and a fresh [Fly.io Sprite](https://docs.sprites.dev) gets all of them,
+merged by rules that refuse rather than guess.
 
-```sh
-sprite-profiles launch claude-code playwright @antialias/shop-inventory --name demo-1
-```
-
-A **profile** is a small folder: what to install, files to push, services to run, the
-network rules and connectors it needs, Claude Code skills and MCP servers, and whether it
-holds a credential.
+[![Latest release](https://img.shields.io/github/v/release/antialias/sprite-profiles)](https://github.com/antialias/sprite-profiles/releases/latest)
+[![License: Apache-2.0](https://img.shields.io/github/license/antialias/sprite-profiles)](LICENSE)
+[![GitHub topic: sprite-profile](https://img.shields.io/badge/topic-sprite--profile-blue)](https://github.com/topics/sprite-profile)
 
 ![A project's sprite-profiles.toml lists seven profiles; one command launches a Sprite with all of them; Claude, asked inside it, builds a page from the shop's real inventory](demo/demo.gif)
 
-*Run for real; pauses over 2 s are cut, and the times on screen are real. The project's own
-profile, [`./weekend`](demo/weekend), brings the task and the permissions Claude needs for it.
+## What a profile is
+
+A profile is a small folder that gives a Sprite one thing: an agent, a tool, a connector.
+
+- **What goes inside the Sprite:** what to install, files to push, services to run, and
+  Claude Code skills and MCP servers.
+- **What is set from outside it:** the network rules and connectors it needs, and the labels
+  that admit it to them.
+- **What it can touch:** every domain and endpoint it reaches, and whether it holds a
+  credential, declared up front and shown before anything runs.
+
+A project lists the profiles it needs in `sprite-profiles.toml`, its own among them:
+
+```toml
+profiles = [
+  "claude-code",
+  "anthropic",
+  "@antialias/shop-inventory@1",
+  "github-mcp",
+  "playwright",
+  "preview",
+  "./weekend",
+]
+```
+
+`sprite-profiles launch` in that folder makes a Sprite with all seven.
+
+## Three demos
+
+Each clip was run for real. Pauses over 2 s are cut, and the times on screen are real.
+
+**Compose.** The clip at the top: one command launches a Sprite with the seven profiles above,
+and Claude, asked inside it, builds a page. The project's own profile,
+[`./weekend`](demo/weekend), brings the task and the permissions Claude needs for it.
 [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory) is
 published by the shop, and the other five ship with sprite-profiles. No key is inside the
-Sprite: Fly's gateway adds them on the way out. Script: [`demo/demo.sh`](demo/demo.sh).*
+Sprite: Fly's gateway adds them on the way out. Script: [`demo/demo.sh`](demo/demo.sh).
 
 <a href="demo/weekend.png"><img src="demo/weekend-page.png" width="560" alt="The page Claude built in the Sprite, at phone size: three weekend projects using the shop's real tools, and a table of how it was made, showing a placeholder key, the shop unreachable directly (000) and the gateway refusing other paths (403)"></a>
 
 *What Claude built, screenshotted by Playwright in that Sprite: the top, and the end, where it
 reports the Sprite's checks. [The whole page](demo/weekend.png).*
 
-**Swap one profile** and Claude's model goes through [Apiary](https://apiary.wtf)'s HTTPS
+**Swap one profile**, and Claude's model goes through [Apiary](https://apiary.wtf)'s HTTPS
 proxy instead of Fly's connector.
 [`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) enrols the Sprite as
 a device that someone approves; the time on its line is mostly that wait.
+Script: [`demo/apiary.sh`](demo/apiary.sh).
 
 ![The project swaps anthropic for @antialias/apiary, launches, waits for the Sprite to be approved as an Apiary device, and Claude answers through Apiary's proxy](demo/apiary.gif)
 
-**Profiles that disagree are refused**, never merged silently:
+**Profiles that disagree are refused**, never merged silently. Here two profiles both set
+`ANTHROPIC_API_KEY`. Script: [`demo/conflict.sh`](demo/conflict.sh).
 
 ![sprite-profiles plan claude-code anthropic anthropic-key is refused, because both profiles set ANTHROPIC_API_KEY](demo/conflict.gif)
 
-## Install
+## Profiles people have published
+
+A published profile is a public git repository with a conventional name, so nothing is
+hosted and anyone can publish one. The vendor of a tool or a service can publish the profile
+for it, and its network rules read like an app's permission list: you see what it reaches
+before it runs.
+
+| pick | what it gives a Sprite | publisher |
+|---|---|---|
+| [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory) | A woodworking shop's tool inventory over MCP, read-only, through a connector; no key in the Sprite | antialias, for the shop it serves |
+| [`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) | Claude Code through [Apiary](https://apiary.wtf)'s switch proxy, the Sprite enrolled as a device you approve | antialias |
+
+[Browse the `sprite-profile` topic](https://github.com/topics/sprite-profile) on GitHub, or
+run `sprite-profiles search`. Published one? [Add yours](../../issues/new?template=add-profile.yml)
+to this table. Missing one? [Ask for it](../../issues/new?template=request-profile.yml).
+
+### Publish yours in three steps
+
+1. **Name a public repository `sprite-profile-NAME`.** People pick it as `@you/NAME`. The
+   [template](https://github.com/antialias/sprite-profile-template) has everything in place:
+   press "Use this template".
+2. **Write `profile.toml` at its root**, with `name = "NAME"`. [Writing a
+   profile](docs/WRITING.md) has the format; the template's workflow checks that it resolves
+   on every push.
+3. **Tag a version and add the topic**, so `sprite-profiles search` finds it:
+
+   ```sh
+   git tag -a v1.0.0 -m "NAME 1.0.0" && git push origin v1.0.0
+   gh repo edit --add-topic sprite-profile
+   ```
+
+[Publishing](docs/PUBLISHING.md) covers versions, collections, monorepos and other git hosts.
+
+## Install, and a 30-second start
 
 Download `sprite-profiles` for your machine from the
 [latest release](https://github.com/antialias/sprite-profiles/releases/latest):
@@ -49,8 +114,32 @@ chmod +x /usr/local/bin/sprite-profiles
 xattr -d com.apple.quarantine /usr/local/bin/sprite-profiles   # macOS: the binary is not notarized
 ```
 
-From a checkout, every command is also a Mix task (Elixir 1.17 or later):
-`mix profiles.plan -p claude-code` is `sprite-profiles plan claude-code`.
+Planning needs no Sprite and no token, and the bundled profiles ship inside the binary:
+
+```sh
+sprite-profiles plan claude-code playwright          # what a Sprite would get, and from whom
+sprite-profiles search shop                          # published profiles on GitHub
+sprite-profiles launch claude-code playwright --name demo
+sprite-profiles exec demo claude -p "Say hello."     # run something inside
+```
+
+| bundled profile | gives a Sprite |
+|---|---|
+| `claude-code` | Claude Code ready to work unattended: hooks that keep the Sprite awake mid-turn, a pre-trusted `~/work`, and an MCP server that needs no sign-in. No model access of its own |
+| `anthropic` | Claude's model through Fly's connector: a custom API connector in your org holds the Anthropic key, and the Sprite holds a placeholder |
+| `anthropic-key` | **privileged**: an Anthropic API key, read from your machine at launch |
+| `github` | GitHub through Fly's connector gateway, with no token in the Sprite |
+| `github-mcp` | GitHub's remote MCP server through a custom API connector you create with `sprite-profiles connect`; inputs pick the toolsets and read-only mode |
+| `playwright` | Playwright and Chromium, then a headless page load to prove it works |
+| `preview` | a static-file service on the Sprite's own URL |
+
+A profile with a connector needs that connector in your org first; without it, the launch is
+refused before anything is created.
+
+[Using profiles](docs/USING.md) goes on from here: picking by name and version, a project's
+set and its lock file, and what a launch does. From a checkout, every command is also a Mix
+task (Elixir 1.17 or later): `mix profiles.plan -p claude-code` is
+`sprite-profiles plan claude-code`.
 
 ## Why not a setup script?
 
@@ -58,37 +147,29 @@ You could install all of that with a setup script in a couple of minutes. Profil
 the parts a script can't do.
 
 **Part of a Sprite's setup isn't inside the Sprite.** Network policy, connector access and
-labels are set through the Sprites API, from outside. A script running in the Sprite can't
-change them, and it shouldn't be able to. A profile declares both halves. Picking `github`
-gives the Sprite a skill that tells its agent how to reach GitHub, a network rule for Fly's
-gateway, and a label that the org's GitHub connector admits. That's GitHub access with no
-token in the Sprite, as one pick.
+labels are set through the Sprites API, from outside, where a script in the Sprite can't and
+shouldn't reach. A profile declares both halves: picking `github` gives the Sprite a skill,
+a network rule for Fly's gateway, and the label the org's GitHub connector admits. That's
+GitHub access with no token in the Sprite, as one pick.
 
 **Scripts don't combine; profiles do.** Run two setup scripts and the second one silently
-wins: both set the same variable, both register an MCP server called `github`, or both
-claim the Sprite's URL. Profiles are declarations, so the whole set is merged and checked
-before a Sprite exists. A disagreement is refused, in a sentence that names both profiles.
-Here the example `preview` meets a profile of your own that also serves the Sprite's URL:
+wins. Profiles are declarations, so the whole set is merged and checked before a Sprite
+exists, and a disagreement is refused in a sentence that names both profiles. Here `preview`
+meets a profile of your own that also serves the Sprite's URL:
 
 ```
-$ mix profiles.plan -p preview -p docs-site
+$ sprite-profiles plan preview docs-site
 Refused:
   [http_port_conflict] profiles 'preview' and 'docs-site' both give a service an http_port ('preview' on 8080, 'docs' on 4000); a Sprite routes its URL to one service, so drop http_port from one of them.
 ```
 
-Network rules combine with every deny ahead of every allow, so a profile that blocks a
-domain beats one that allows it. A missing connector, or an MCP server that would sit
-waiting for a sign-in nobody can answer, is refused before anything is created, not a
-minute into setup.
-
-**Agents get a boundary.** An agent can write a setup script in seconds, so setup isn't what
-needs guarding. What needs guarding is what an agent shouldn't choose: credentials, network
-reach and connectors. A profile that holds a credential is marked **privileged**. An agent
-may not launch a set that holds one, and the credential is applied after the Sprite's
-checkpoint, so restoring that checkpoint never brings a key back.
+**Agents get a boundary.** What needs guarding isn't setup but what an agent shouldn't
+choose: credentials, network reach and connectors. A profile that holds a credential is
+**privileged**. An agent may not launch a set that holds one, and the credential is applied
+after the Sprite's checkpoint, so restoring that checkpoint never brings a key back.
 
 ```
-$ mix profiles.plan -p claude-code -p anthropic-key --agent
+$ sprite-profiles plan claude-code anthropic-key --agent
 Refused:
   [not_for_agents] profile 'anthropic-key' is privileged; an agent may not launch a set that holds it, so a person must launch this set.
 ```
@@ -97,452 +178,44 @@ If you are one person with one setup that never changes, a script is fine. Profi
 pay when there is a second author, such as a teammate or a vendor whose profile sits next to
 yours, or when an agent is the one launching Sprites.
 
-## Quick start: plan a set
-
-Planning needs no Sprite and no token. The example profiles ship inside the binary.
-
-```sh
-sprite-profiles plan claude-code playwright
-```
-
-The plan says what the Sprite will get, which profile each part comes from, and in what
-order:
-
-```
-Plan for claude-code+playwright
-
-Apply order:
-  1. claude-code  (setup.sh, up to 5m)
-  2. playwright  (setup.sh, up to 20m)
-  -- checkpoint "profiled: claude-code+playwright" --
-
-Labels:
-  profile:claude-code
-  profile:playwright
-
-Connectors: none
-
-Network policy:
-  include defaults
-  allow mcp.context7.com
-  allow console.anthropic.com
-  allow platform.claude.com
-  allow cdn.playwright.dev
-  allow example.com
-
-Env:
-  DISABLE_AUTOUPDATER = "1"  (claude-code)
-
-Services: none
-
-MCP servers:
-  context7 (http) https://mcp.context7.com/mcp  (claude-code)
-...
-```
-
-Name the profiles in the order they should apply (`-p NAME` works too, as in the Mix
-tasks). A refused set exits 1 and prints one line per refusal: a code in brackets for programs, then a
-sentence for people. `--agent` judges the set as an agent would launch it.
-
-## Find a profile
-
-Published profiles are git repositories that follow a naming convention, so nothing is
-hosted. Search GitHub for them:
-
-```
-$ sprite-profiles search shop
-@antialias/shop-inventory  1.0.0  ★0  A woodworking shop's tool inventory over MCP, read-only; no key in the Sprite · connector woodworking.haunt.house /mcp, allows api.sprites.dev
-```
-
-Each line ends with what the profile can touch. `sprite-profiles show @antialias/shop-inventory`
-prints all of it: the connector and its endpoints, the network rules, MCP servers, env,
-skills, whether it runs a `setup.sh`, and whether it is privileged.
-
-Pick a published profile by name. `@antialias/shop-inventory` is the newest version;
-`@antialias/shop-inventory@1` the newest 1.x, as are `@1.2` and `@1.2.3` at their level; a
-branch or a commit (`@main`) works while a profile is in development.
-
-### A project's set
-
-```sh
-sprite-profiles add claude-code @antialias/shop-inventory
-sprite-profiles lock
-sprite-profiles launch --lock sprite-profiles.lock --name demo-2
-```
-
-`add` writes `sprite-profiles.toml`, this project's set, with each name at its major
-version (`@1`), like npm's `^`. In a folder holding that file, `plan`, `lock` and `launch`
-take no picks. `lock` writes `sprite-profiles.lock` (below); commit both.
-
-A pick starting with `./`, `../`, `/` or `~/` is a path to a profile folder, so a project's
-own profile composes with published and bundled ones without changing the search path; in
-`sprite-profiles.toml` it is relative to that file's folder:
-
-```sh
-sprite-profiles launch claude-code @antialias/shop-inventory ./weekend --name demo
-```
-
-### By address
-
-A profile can also be picked by its address, in the form GitHub Actions uses:
-`owner/repo/path@ref`. The ref is a tag, a branch or a commit, and it is required. This
-repository's own `preview`, fetched from GitHub:
-
-```sh
-sprite-profiles plan claude-code antialias/sprite-profiles/profiles/preview@main
-```
-
-The plan gains a Sources section, so you see where the code comes from before it runs:
-
-```
-Sources:
-  antialias/sprite-profiles/profiles/preview@main  publisher antialias, repo antialias/sprite-profiles, main = 9da6fc08, no setup.sh
-
-Labels:
-  profile:claude-code
-  profile:antialias.preview
-```
-
-A fetched profile is named for its publisher: its label is `profile:antialias.preview`, not
-`profile:preview`. A label follows how the profile is picked, so only a repository owned by
-`antialias` can give that label, and a connector granted to it stays with it.
-
-Fetching a public GitHub repository needs no token and no `git`. A private one, a very large
-one, or one on another git host (`git.example.com/team/profiles/linear@v1`) is fetched with
-`git`, through the credentials your git already has. What is fetched is kept once per commit
-in `~/.cache/sprite-profiles/`. A branch moves, so pin the set before you
-launch it:
-
-```sh
-sprite-profiles lock claude-code antialias/sprite-profiles/profiles/preview@main
-sprite-profiles launch --lock sprite-profiles.lock --name demo-3
-sprite-profiles plan --lock sprite-profiles.lock --offline
-```
-
-`sprite-profiles lock` writes `sprite-profiles.lock`: the set, with every name and address
-pinned to a commit, and each name's version. A launch from the lock uses those commits and
-looks nothing up. Run `lock` again to move to the newest versions and commits; it prints
-each one that changed.
-`--offline` calls nothing, and works once the commits are cached.
-
-A fetched profile's `setup.sh` runs with the Sprite's full access, like your own. Read the
-Sources section before you launch.
-
-## Launch a Sprite
-
-You need the [`sprite` CLI](https://docs.fly.io/sprites/quickstart.md), logged in. The
-launcher runs it for you and never reads or prints your token.
-
-```sh
-sprite-profiles launch claude-code anthropic github-mcp playwright preview ./weekend --name demo
-sprite-profiles exec demo claude -p "Build the weekend page."   # run something inside
-sprite checkpoint list -s demo
-sprite destroy --force demo                                      # when you're done
-```
-
-It prints a line for the Sprite, then one per profile as it finishes, with the time it
-took and what it added, then the last line with the Sprite's URL:
-
-```
-✓ Sprite demo    1.9 s  2 connectors admitted · network policy · 6 env vars
-✓ claude-code    4.6 s  setup · MCP context7 · hooks · 1 setting · 1 skill · 1 file
-✓ anthropic      0.3 s  connector api.anthropic.com
-✓ github-mcp     1.6 s  connector api.githubcopilot.com · MCP github · 1 skill
-✓ playwright    41.0 s  setup · 1 file
-✓ preview        5.8 s  service preview :8080 · 1 file
-✓ ./weekend      1.3 s  9 permissions · 1 skill
-✓ demo: 6 profiles · checkpointed · 57.9 s
-  https://demo-b6mfx.sprites.app
-```
-
-While a profile's `setup.sh` runs, its output shows under a `… <profile>` line (the last
-ten lines, dimmed), so you can act on what it asks, such as a sign-in's address and code;
-when it finishes, those lines give way to the profile's ✓ line. When the output is not a
-terminal (a pipe, an agent), nothing is erased: the setup lines are printed indented, then
-the ✓ line. A failed step prints a ✗ line with its error and its last 20 lines of output,
-and how to destroy the Sprite. `--verbose` prints every step with its time instead, the
-setup output as it comes, and a summary (labels, checkpoint id, the launch record's path).
-
-`sprite-profiles exec NAME CMD [ARG ...]` runs a command in the Sprite in a login shell, so
-the profiles' env and shell hooks apply, with each argument passed as it is. It prints the
-output as it comes and exits with the command's status; standard input is not passed on.
-Everything after NAME belongs to the command, options and all.
-
-The launch, step by step (`mix profiles.launch -p claude-code -p preview` does the same
-from a checkout):
-
-1. Merge the set, and refuse before any API call.
-2. If the set needs a connector, check that one in the org admits it.
-3. Create the Sprite, with a `profile:<name>` label for every pick (`profile:<owner>.<name>`
-   for a published one).
-4. Set the network policy.
-5. Apply each profile in order: files, skills, Claude settings, MCP servers, then
-   `setup.sh` (holding a Sprites Task so the Sprite stays awake, and showing its output
-   as it runs), then services.
-6. Checkpoint it as `profiled: claude-code+preview`.
-7. Apply privileged profiles, after the checkpoint.
-
-`--dry-run` stops after step 1. `--destroy-on-failure` removes the Sprite if a later step
-fails; otherwise it is left for you to inspect. A record of each launch goes to
-`~/.local/state/sprite-profiles/launches/`, outside the repository.
-
-A privileged profile's secret is read on your machine from
-`~/.config/sprite-profiles/secrets/<NAME>` (one line, `chmod 600`), or from the folder
-`--secrets-dir` names. It is never in a profile. On a server without the CLI,
-`--adapter api` calls the Sprites API with the org token in `SPRITES_TOKEN`; so far that
-path is tested against a stub only.
-
-## Write your own profile
-
-Your own profiles live outside this repository, in `~/.config/sprite-profiles/profiles/`,
-and compose with the examples. A profile is a folder named for it:
-
-```
-~/.config/sprite-profiles/profiles/node-tools/
-  profile.toml      required
-  setup.sh          optional: runs in the Sprite as user `sprite`; must be safe to run twice
-  files/            optional: pushed to $HOME, keeping the tree
-  claude/skills/    optional: each folder becomes ~/.claude/skills/node-tools--<skill>/
-```
-
-`profile.toml`:
-
-```toml
-name    = "node-tools"
-summary = "The TypeScript compiler and Prettier"
-
-[policy]
-rules = [ { include = "defaults" } ]   # the defaults already allow npm's registry
-```
-
-`setup.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-npm install -g typescript prettier
-npx tsc --version
-```
-
-Plan it with an example, then launch it. Launched as written, `claude-code + node-tools`
-took 12.6 s:
-
-```sh
-mix profiles.plan -p claude-code -p node-tools
-mix profiles.launch -p claude-code -p node-tools --name demo-2
-```
-
-Some rules worth knowing before you write more:
-
-- **Say what network you need.** When no profile in a set declares a policy, the Sprite's
-  default applies, which is unrestricted. As soon as one does, only the combined rules
-  apply. So a profile that needs a domain should allow it, as `node-tools` does above.
-- **`setup.sh` runs in a plain shell.** Node's global commands, such as `tsc` here, are on
-  the PATH of an interactive shell but not of `setup.sh`. Call them through `npx`.
-- **Keep secrets out.** A secret is `{ secret = "NAME" }` in `[env]`, and only a profile
-  marked `privileged = true` may use one. The value stays on the launching machine.
-- **Add, never override.** A profile can't remove or change what another one sets. If two
-  profiles set the same thing, the set is refused, and you choose which one gives way.
-- **Typos are errors.** A field the format doesn't define is refused, so a misspelling can't
-  silently do nothing.
-
-[docs/SPEC.md](docs/SPEC.md) has every field, merge rule and refusal code. `--dir`
-(repeatable) or `SPRITE_PROFILES_PATH` (colon-separated) replaces the search path; a path
-pick (`./weekend`) names one folder and leaves the path alone. The same
-name found in two folders is refused, so your profile never silently shadows an example.
-
-## Publish a profile
-
-A published profile is a public git repository, found by its name:
-
-| you publish | people pick |
-|---|---|
-| a repository `owner/sprite-profile-NAME`, with `profile.toml` at its root | `@owner/NAME` |
-| a folder `NAME/` or `profiles/NAME/` in your collection, `owner/sprite-profiles` | `@owner/NAME` |
-| a line `NAME = "REPO/path"` in your collection's `links.toml`, pointing into another of your repositories, such as a monorepo | `@owner/NAME` |
-
-Versions are tags: `v1.0.0` for a profile at a repository's root, `<folder>/v1.0.0` for one
-in a folder (`profiles/linear/v1.0.0`). Give the repository the topic `sprite-profile` so
-`sprite-profiles search` finds it:
-
-```sh
-git tag -a v1.0.0 -m "linear 1.0.0" && git push origin v1.0.0
-gh repo edit --add-topic sprite-profile
-```
-
-A profile's label and connector name follow its publisher: `@acme/linear` is
-`profile:acme.linear`, and only a repository owned by `acme` can give it.
-[sprite-profile-shop-inventory](https://github.com/antialias/sprite-profile-shop-inventory) is a
-complete example, published by the service it connects to.
-[sprite-profile-apiary](https://github.com/antialias/sprite-profile-apiary) is another: it
-routes Claude Code through [Apiary](https://apiary.wtf)'s switch proxy, an HTTPS proxy a
-connector can't front, so its `setup.sh` enrols the Sprite as a device you approve, and
-`checkpoint = false` keeps the device's token out of every checkpoint.
-
-**Other git hosts.** The same layout works on any git server. On a self-hosted Gitea,
-`@git.example.com/team/linear` finds `team/sprite-profile-linear` there; a first part
-holding a `.` is a host. It is fetched with `git`, through the credentials your git already
-has, so a private repository works and sprite-profiles never asks for a password. Search
-covers GitHub only.
-
-## Inputs and a company's API
-
-Some values differ for each person who launches a profile but aren't secrets: a
-repository, a region, a mode. A profile declares them as inputs, and you give them with
-`-i` when you plan, lock or launch. An input reaches the Sprite only through `[env]`, and
-it shows in the plan, the lock and the launch record, so it must never be a secret.
-
-A company's API needs a token, which is a secret. A profile doesn't hold it. Instead it
-declares a custom API connector, and each person puts their own token in a connector in
-their own org. The Sprite calls the API through the Sprites gateway, which adds the token,
-so the Sprite never sees it. The profile has no secret and isn't privileged, so an agent
-may launch it.
-
-The `github-mcp` example does this for GitHub's remote MCP server. Its connector and inputs:
-
-```toml
-format = 2
-
-[inputs.readonly]
-summary = "true: only read tools; false: write tools too (the token must allow them)"
-default = "true"
-pattern = '^(true|false)$'
-
-[env]
-GITHUB_MCP_URL      = { from = "connector", provider = "custom_api" }
-GITHUB_MCP_READONLY = { from = "input", name = "readonly" }
-
-[[connectors]]
-provider  = "custom_api"
-base_url  = "https://api.githubcopilot.com"
-endpoints = ["/mcp/"]
-test_url  = "https://api.github.com/user"
-
-[claude.mcp_servers.github]
-type = "http"
-url  = "${GITHUB_MCP_URL}/mcp/"
-auth = "connector"            # the gateway adds the credential
-headers = { X-MCP-Readonly = "${GITHUB_MCP_READONLY}" }
-```
-
-(The real file has a second input, `toolsets`.) Make a fine-grained GitHub token with only
-the repositories and permissions you want agents to have, then create the connector once,
-in a terminal:
-
-```sh
-mix profiles.connect -p github-mcp
-```
-
-It prints what it will create, then asks for the token with echo off and sends it to Fly
-once. The connector is named for the profile (`github-mcp`, or `<owner>.github-mcp` for a
-published copy), and its access policy admits only Sprites labelled `profile:github-mcp`,
-calling only `/mcp/`. Fly then tests the token against `test_url`. Run it again to change
-the token. There is no flag for the token and it won't run without a terminal: this
-command is a person's, never an agent's.
-
-Then launch, choosing the inputs:
-
-```sh
-mix profiles.launch -p claude-code -p github-mcp -i readonly=true --name demo-4
-```
-
-Before it creates anything, the launcher checks that the org has the connector, that its
-policy admits this Sprite, that it allows every endpoint the profile declares, and that it
-points at the profile's base URL. If any of those fail, it refuses and names the command
-that fixes it.
-
-## For agents
-
-- [docs/SPEC.md](docs/SPEC.md) is the contract, and [AGENTS.md](AGENTS.md) has the rules
-  for working on this repository.
-- Before you launch a set, plan it with `--agent`. Exit 0 means you may launch it. Exit 1
-  means it is refused: act on the code in brackets. When the sentence says a person must
-  launch the set, hand it to a person; don't look for a way around it.
-- Never write a credential into a profile, a file or a command line. If a set needs a
-  secret, it needs a privileged profile or a connector, and those are a person's to set
-  up. `mix profiles.connect` is a person's command; never try to run it.
-- Inputs are not secrets, so you may pass them with `-i`. A refusal for a missing or
-  invalid input names the input and what it takes.
-- To give Sprites a new capability, add a profile rather than changing one Sprite by hand.
-  The next Sprite gets it too, and the merge checks it against everything else.
-- Inside a launched Sprite, each profile's skills are at
-  `~/.claude/skills/<profile>--<skill>/`, or `<owner>.<profile>--<skill>/` for a published
-  one.
-- Prefer launching a lock file. A lock names exact commits, so the set you checked is the
-  set you launch.
-
-Next comes an MCP server, so that an agent can list profiles and launch sets without ever
-holding the Sprites token. It will refuse privileged sets on its own; today that judgment is
-`mix profiles.plan --agent`.
-
-## The example profiles
-
-| profile | gives a Sprite |
-|---|---|
-| `claude-code` | Claude Code ready to work unattended: hooks that keep the Sprite awake mid-turn, a pre-trusted `~/work`, and an MCP server that needs no sign-in. No model access of its own |
-| `github` | GitHub through Fly's connector gateway, with no token in the Sprite |
-| `github-mcp` | GitHub's remote MCP server through a custom API connector you create with `mix profiles.connect`; inputs pick the toolsets and read-only mode |
-| `playwright` | Playwright and Chromium, then a headless page load to prove it works |
-| `anthropic-key` | **privileged**: an Anthropic API key, read from your machine at launch |
-| `preview` | a static-file service on the Sprite's own URL |
-
-`github` needs a GitHub connector in your org whose access policy names the label
-`profile:github`. Without one, the launch is refused before anything is created.
-
-## What it costs, measured
-
-Each example set was launched on fresh Sprites ([docs/RESULTS.md](docs/RESULTS.md) has every
-step):
-
-| set | total | of which |
-|---|---:|---|
-| `claude-code + anthropic-key` | 6.7 s | the key, applied after the 0.4 s checkpoint |
-| `claude-code + preview` | 11.8 s | creating the service, 5.4 s |
-| `claude-code + playwright` | 49-65 s | Playwright's setup, 36-53 s |
-
-Restoring the playwright Sprite's checkpoint takes 3.9 s, but a checkpoint can only be
-restored into the Sprite that took it, so every new Sprite pays the full setup again.
-Starting a new Sprite from a checkpoint would turn that minute into seconds, and a set of
-profiles at fixed versions is a natural key for such a template.
-
-[docs/launch.cast](docs/launch.cast) is a terminal recording of a launch; play it with
-`asciinema play docs/launch.cast`. It shows an agent refused a privileged set, then a person
-launching `claude-code + playwright`, with headless Chromium loading a page in the new
-Sprite.
-
-## Where this could go
-
-A shelf of setup scripts isn't something you can share safely, because you can't combine
-two of them. A shelf of profiles can be: each declares what it needs, the merged plan shows
-everything before launch, and a conflict is a refusal. A profile's network rules work like
-an app's permission list: you see "reaches github.com and npm" before it runs. So the vendor
-of a tool or a connector could publish the profile for it.
-
-Profiles can already be published and picked by address, pinned to a commit. What's still
-missing: signed profiles, or a list of publishers you trust, since `setup.sh` runs with the
-Sprite's full access; dependencies between profiles; and starting a Sprite from a template,
-which only the platform can provide.
-
-## Status
-
-The profile format, the merge rules, `mix profiles.plan` and `mix profiles.launch` work
-today, and five of the six examples have been launched on real Sprites. `github` waits on a
-connector. Profiles can be picked by address from public GitHub repositories and pinned with
-`mix profiles.lock`; a locked set mixing a local and a published profile has been launched
-on a real Sprite. Format 2 adds inputs and custom API connectors, with
-`mix profiles.connect`. `github-mcp` has been launched with a real GitHub token: Claude
-Code in the Sprite connected to GitHub's MCP server, its inputs chose the read-only
-toolsets, and the token never entered the Sprite. A service has published its own
-profile, [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory):
-picked by name, it gave Claude Code in a Sprite read-only access to a shop's
-inventory through a connector. Published profiles are
-found by name (`@owner/name@1`), on GitHub or any git server, searched on GitHub, and kept
-per project in `sprite-profiles.toml`; the `sprite-profiles` command runs them with no
-Erlang installed. Next come the MCP server for agents and a web catalogue for picking a set.
-
-- [docs/SPEC.md](docs/SPEC.md): the profile format, the merge rules and the launch sequence.
-- [docs/RESULTS.md](docs/RESULTS.md): step timings on real Sprites.
-- [CONTRIBUTING.md](CONTRIBUTING.md): how to contribute, and what must never be committed.
+## Docs
+
+- [Using profiles](docs/USING.md): find, pick, pin and launch a set, and what each step does.
+- [Writing a profile](docs/WRITING.md): the folder, `profile.toml`, `setup.sh`, and the rules
+  worth knowing first.
+- [Publishing a profile](docs/PUBLISHING.md): repository names, versions, the topic,
+  collections and other git hosts.
+- [Inputs and a company's API](docs/INPUTS.md): per-person values, and a token kept in a
+  connector instead of the Sprite.
+- [For agents](docs/FOR-AGENTS.md): how an agent plans, launches and stays inside the
+  boundary.
+- [The spec](docs/SPEC.md): every field, merge rule, refusal code and launch step.
+- [Measured costs and results](docs/RESULTS.md): what each set costs on real Sprites, and
+  what was verified.
+
+## Roadmap
+
+- [x] Profiles by name and version (`@owner/name@1`), and by address, pinned to a commit
+- [x] Other git hosts, fetched with your own git credentials
+- [x] `sprite-profiles search`, over the GitHub topic
+- [x] A project's set in `sprite-profiles.toml`, pinned in `sprite-profiles.lock`
+- [x] A standalone command with no Erlang to install
+- [x] A compact launch, one line per profile
+- [x] `sprite-profiles exec`, to run a command in the Sprite with the profiles' env
+- [ ] An MCP server, so an agent can list profiles and launch sets without the Sprites token
+- [ ] A web catalogue for picking a set
+- [ ] Signed profiles, or a list of publishers you trust, since `setup.sh` runs with the
+  Sprite's full access
+- [ ] Dependencies between profiles
+- [ ] Starting a Sprite from a template, which only the platform can provide: a set at fixed
+  versions is a natural key for one, and it would turn a minute of setup into seconds
+
+## Contributing
+
+The most useful contribution is a profile: publish one and
+[add it to the gallery](../../issues/new?template=add-profile.yml). Bug reports and pull
+requests are welcome too; [CONTRIBUTING.md](CONTRIBUTING.md) has the checks to run and what
+must never be committed. Questions and ideas go to [Discussions](../../discussions).
 
 ## License
 

@@ -1,10 +1,44 @@
 # Results: the example profiles on real Sprites
 
+What a set costs to launch, and what has been run on real Sprites, with the evidence for each.
+
+## What it costs
+
+Each example set was launched on fresh Sprites ([step timings](#step-timings) below):
+
+| set | total | of which |
+|---|---:|---|
+| `claude-code + anthropic-key` | 6.7 s | the key, applied after the 0.4 s checkpoint |
+| `claude-code + preview` | 11.8 s | creating the service, 5.4 s |
+| `claude-code + playwright` | 49-65 s | Playwright's setup, 36-53 s |
+
+Restoring the playwright Sprite's checkpoint takes 3.9 s, but a checkpoint can only be
+restored into the Sprite that took it, so every new Sprite pays the full setup again.
+Starting a new Sprite from a checkpoint would turn that minute into seconds, and a set of
+profiles at fixed versions is a natural key for such a template.
+
+## What has been run
+
+The profile format, the merge rules, planning and launching work today, and every bundled
+profile but `github` has been launched on real Sprites; `github` waits on a GitHub connector.
+Profiles can be picked by address from public GitHub repositories and pinned in a lock file;
+a locked set mixing a local and a published profile has been launched on a real Sprite.
+Format 2 adds inputs and custom API connectors, with `connect`. `github-mcp` has been
+launched with a real GitHub token: Claude Code in the Sprite connected to GitHub's MCP
+server, its inputs chose the read-only toolsets, and the token never entered the Sprite. A
+service has published its own profile,
+[`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory):
+picked by name, it gave Claude Code in a Sprite read-only access to a shop's inventory
+through a connector. Published profiles are found by name (`@owner/name@1`), on GitHub or
+any git server, searched on GitHub, and kept per project in `sprite-profiles.toml`; the
+`sprite-profiles` command runs them with no Erlang installed. The sections below have the
+details, oldest first.
+
+## Step timings
+
 Measured on 2026-11-18 with `mix profiles.launch` and the `sprite` CLI adapter, each on a
 fresh Sprite that was destroyed afterwards. Times are the launcher's own, per step, from the
 laptop: each includes one CLI round trip to the Sprites API.
-
-## Step timings
 
 | step | claude-code + preview | claude-code + anthropic-key | claude-code + playwright |
 |---|---:|---:|---:|
@@ -18,8 +52,13 @@ laptop: each includes one CLI round trip to the Sprites API.
 | after the checkpoint (privileged env) | | 0.43 s | |
 | **total** | **11.82 s** | **6.65 s** | **48.88 s** |
 
-The playwright column is the recorded launch ([launch.cast](launch.cast)). Over four
-launches of `claude-code + playwright` the numbers were:
+The playwright column is the recorded launch, [launch.cast](launch.cast): an older
+terminal recording, made with `mix profiles.launch` before the standalone command and its
+compact output. Play it with `asciinema play docs/launch.cast`. It shows an agent refused a
+privileged set, then a person launching `claude-code + playwright`, with headless Chromium
+loading a page in the new Sprite.
+
+Over four launches of `claude-code + playwright` the numbers were:
 
 | | min | median | max |
 |---|---:|---:|---:|
