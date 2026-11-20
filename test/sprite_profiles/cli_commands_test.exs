@@ -64,6 +64,15 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert out =~ "Checkpoint:  applied after the launch's checkpoint, never saved in one"
   end
 
+  test "show lists the Claude Code settings a profile grants" do
+    {0, out, ""} = run(["show", "claude-code", "--dir", @profiles])
+
+    assert out =~
+             ~r/Claude:      hooks PreToolUse, Stop, UserPromptSubmit; sets env\.BASH_DEFAULT_TIMEOUT_MS/
+
+    refute run(["show", "github-mcp", "--dir", @profiles]) |> elem(1) =~ "Claude:"
+  end
+
   test "show resolves a name to its newest version" do
     stub_names()
     {0, out, ""} = run(["show", "@acme/linear"])

@@ -48,6 +48,7 @@ defmodule SpriteProfiles.Commands.Show do
       field("Env:", list_or_none(env(p.env))),
       if(p.inputs != %{}, do: field("Inputs:", inputs(p.inputs))),
       field("Skills:", list_or_none(Enum.map(p.skills, & &1.name))),
+      if(p.claude_settings != %{}, do: field("Claude:", claude(p.claude_settings))),
       "  " <>
         column("setup.sh:    #{setup(p)}", 28) <>
         column("privileged: #{yes_no(p.privileged)}", 18) <>
@@ -59,6 +60,42 @@ defmodule SpriteProfiles.Commands.Show do
     |> Enum.reject(&is_nil/1)
     |> Kernel.++(hints(p, pick))
   end
+
+  # What a profile's Claude Code settings grant: permission rules in full, hook events by name,
+  # and the path of every other setting.
+  defp claude(settings) do
+    perms = Map.get(settings, "permissions", %{})
+    hooks = Map.get(settings, "hooks", %{})
+
+    rest =
+      settings
+      |> Map.drop(["permissions", "hooks"])
+      |> Map.merge(Map.drop(perms, ["allow", "deny"]) |> prefix("permissions"))
+      |> leaf_paths([])
+
+    [
+      rules("allows", perms["allow"]),
+      rules("denies", perms["deny"]),
+      if(hooks != %{}, do: "hooks " <> Enum.join(Enum.sort(Map.keys(hooks)), ", ")),
+      if(rest != [], do: "sets " <> Enum.join(rest, ", "))
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("; ")
+  end
+
+  defp rules(_verb, rules) when rules in [nil, []], do: nil
+  defp rules(verb, rules), do: "#{verb} " <> Enum.join(rules, ", ")
+
+  defp prefix(map, _key) when map == %{}, do: map
+  defp prefix(map, key), do: %{key => map}
+
+  defp leaf_paths(map, path) when is_map(map) do
+    map
+    |> Enum.sort()
+    |> Enum.flat_map(fn {k, v} -> leaf_paths(v, path ++ [k]) end)
+  end
+
+  defp leaf_paths(_leaf, path), do: [Enum.join(path, ".")]
 
   # At least two spaces after the text.
   defp column(text, width), do: String.pad_trailing(text, max(width, String.length(text) + 2))
