@@ -54,6 +54,14 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert out =~ ~r/setup.sh:    none +privileged: no +files: 0/
     assert out =~ "Once per org:  sprite-profiles connect github-mcp"
     assert out =~ "Launch:        sprite-profiles launch claude-code github-mcp --name demo"
+    refute out =~ "Checkpoint:"
+  end
+
+  test "show says when a profile is kept out of checkpoints" do
+    {0, out, ""} = run(["show", "anthropic-key", "--dir", @profiles])
+
+    assert out =~ ~r/privileged: yes/
+    assert out =~ "Checkpoint:  applied after the launch's checkpoint, never saved in one"
   end
 
   test "show resolves a name to its newest version" do

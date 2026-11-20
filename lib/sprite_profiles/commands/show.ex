@@ -51,7 +51,10 @@ defmodule SpriteProfiles.Commands.Show do
       "  " <>
         column("setup.sh:    #{setup(p)}", 28) <>
         column("privileged: #{yes_no(p.privileged)}", 18) <>
-        "files: #{length(p.files)}"
+        "files: #{length(p.files)}",
+      if(not p.checkpoint,
+        do: field("Checkpoint:", "applied after the launch's checkpoint, never saved in one")
+      )
     ]
     |> Enum.reject(&is_nil/1)
     |> Kernel.++(hints(p, pick))

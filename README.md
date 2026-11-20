@@ -319,6 +319,10 @@ A profile's label and connector name follow its publisher: `@acme/linear` is
 `profile:acme.linear`, and only a repository owned by `acme` can give it.
 [sprite-profile-shop-inventory](https://github.com/antialias/sprite-profile-shop-inventory) is a
 complete example, published by the service it connects to.
+[sprite-profile-apiary](https://github.com/antialias/sprite-profile-apiary) is another: it
+routes Claude Code through [Apiary](https://apiary.wtf)'s switch proxy, an HTTPS proxy a
+connector can't front, so its `setup.sh` enrols the Sprite as a device you approve, and
+`checkpoint = false` keeps the device's token out of every checkpoint.
 
 **Other git hosts.** The same layout works on any git server. On a self-hosted Gitea,
 `@git.example.com/team/linear` finds `team/sprite-profile-linear` there; a first part
