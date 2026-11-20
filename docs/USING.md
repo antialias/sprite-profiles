@@ -164,7 +164,7 @@ and what it added, then the last line with the Sprite's URL:
 ✓ preview        5.8 s  service preview :8080 · 1 file
 ✓ ./weekend      1.3 s  9 permissions · 1 skill
 ✓ demo: 6 profiles · checkpointed · 57.9 s
-  https://demo-b6mfx.sprites.app
+  https://demo-<id>.sprites.app
 ```
 
 While a profile's `setup.sh` runs, its output shows under a `… <profile>` line (the last ten

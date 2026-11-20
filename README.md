@@ -76,7 +76,7 @@ before it runs.
 
 | pick | what it gives a Sprite | publisher |
 |---|---|---|
-| [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory) | A woodworking shop's tool inventory over MCP, read-only, through a connector; no key in the Sprite | antialias, for the shop it serves |
+| [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory) | A woodworking shop's tool inventory over MCP, read-only, through a connector; no key in the Sprite | the shop (antialias) |
 | [`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) | Claude Code through [Apiary](https://apiary.wtf)'s switch proxy, the Sprite enrolled as a device you approve | antialias |
 
 [Browse the `sprite-profile` topic](https://github.com/topics/sprite-profile) on GitHub, or
