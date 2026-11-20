@@ -37,4 +37,5 @@ Neither key is in this Sprite: Fly's connector gateway adds them on the way out.
 7. Call it "the shop". Never name its owner or anyone in the household, and leave out the
    household's bikes. No prices, serial numbers or locations: the token can't see them, so
    don't guess them.
-8. When done, say in two lines what you built.
+8. When done, your whole reply is one plain sentence under 90 characters: no list, no
+   markdown, no details (they are on the page).
