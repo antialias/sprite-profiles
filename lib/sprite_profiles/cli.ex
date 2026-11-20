@@ -647,13 +647,12 @@ defmodule SpriteProfiles.CLI do
       end)
 
       write_project(file, project, profiles_after)
-      Out.info(out, "#{ProjectFile.name()}: #{Enum.join(profiles_after, ", ")}")
       0
     end
   end
 
   defp added_detail(%{source: nil}), do: "  (local)"
-  defp added_detail(%{source: %{version: v}}) when is_binary(v), do: "  (newest: #{v})"
+  defp added_detail(%{source: %{version: v}}) when is_binary(v), do: "  (#{v})"
   defp added_detail(%{source: s}), do: "  (#{s.ref} = #{String.slice(s.sha, 0, 8)})"
 
   # A name picked by version, or with none, is written with its major version, like npm's
@@ -687,7 +686,6 @@ defmodule SpriteProfiles.CLI do
         {_, {:ok, profiles}} ->
           write_project(file, project, profiles)
           Enum.each(project.profiles -- profiles, &Out.info(out, "Removed #{&1}"))
-          Out.info(out, "#{ProjectFile.name()}: #{Enum.join(profiles, ", ")}")
           0
 
         {_, {:missing, missing}} ->

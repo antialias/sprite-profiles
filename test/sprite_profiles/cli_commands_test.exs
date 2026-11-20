@@ -233,7 +233,8 @@ defmodule SpriteProfiles.CLICommandsTest do
 
     {0, out, ""} = run(["add", "claude-code", "@acme/solo", "--dir", @profiles], cwd: dir)
     assert out =~ "Added claude-code  (local)"
-    assert out =~ "Added @acme/solo@1  (newest: 1.10.0)"
+    assert out =~ "Added @acme/solo@1  (1.10.0)"
+    refute out =~ "sprite-profiles.toml:"
     assert File.read!(file) =~ ~s(profiles = ["claude-code", "@acme/solo@1"])
     assert File.read!(file) =~ "[inputs]"
 
@@ -244,7 +245,7 @@ defmodule SpriteProfiles.CLICommandsTest do
              ProjectFile.read(file)
 
     {0, out, ""} = run(["remove", "@acme/solo"], cwd: dir)
-    assert out =~ "Removed @acme/solo@main\n"
+    assert out == "Removed @acme/solo@main\n"
     assert {:ok, %{profiles: ["claude-code", "@acme/linear@1"]}} = ProjectFile.read(file)
 
     {1, _, err} = run(["remove", "github"], cwd: dir)
