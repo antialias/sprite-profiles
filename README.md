@@ -252,7 +252,7 @@ took and what it added, then the last line with the Sprite's URL:
 ✓ playwright    41.0 s  setup · 1 file
 ✓ preview        5.8 s  service preview :8080 · 1 file
 ✓ ./weekend      1.3 s  9 permissions · 1 skill
-✓ demo: 6 profiles · 2 connectors admitted · checkpointed · 57.9 s
+✓ demo: 6 profiles · checkpointed · 57.9 s
   https://demo-b6mfx.sprites.app
 ```
 

@@ -7,7 +7,7 @@ defmodule SpriteProfiles.LaunchView do
       ✓ Sprite demo        1.9 s  2 connectors admitted · network policy · 4 env vars
       ✓ claude-code        4.6 s  setup · MCP context7 · hooks · 1 skill · 1 file
       ✓ preview            0.8 s  service preview :8080 · 1 file
-      ✓ demo: 2 profiles · 2 connectors admitted · checkpointed · 7.3 s
+      ✓ demo: 2 profiles · checkpointed · 7.3 s
         https://demo-b6mfx.sprites.app
 
   While a unit works, a terminal shows a `… <pick>` line with the last lines `setup.sh`
@@ -153,14 +153,13 @@ defmodule SpriteProfiles.LaunchView do
   @doc """
   The last line of a launch that finished, for a recording: no URL and no checkpoint id.
 
-      ✓ demo: 4 profiles · 2 connectors admitted · checkpointed · 14.2 s
+      ✓ demo: 4 profiles · checkpointed · 14.2 s
   """
   def done_line(record) do
     checkpointed = if record.checkpoint, do: "checkpointed", else: "not checkpointed"
     total = :erlang.float_to_binary(record.total_ms / 1000, decimals: 1)
 
-    "✓ #{record.name}: #{count(length(record.profiles), "profile")} · " <>
-      "#{count(length(record.connectors), "connector")} admitted · #{checkpointed} · #{total} s"
+    "✓ #{record.name}: #{count(length(record.profiles), "profile")} · #{checkpointed} · #{total} s"
   end
 
   @doc """

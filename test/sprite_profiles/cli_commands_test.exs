@@ -363,7 +363,7 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert Enum.any?(lines, &(&1 =~ ~r/^  create +\d+\.\d\d s  labels set at create/))
 
     assert List.last(lines) =~
-             ~r/^✓ demo-1: 1 profile · 0 connectors admitted · checkpointed · \d+\.\d s$/
+             ~r/^✓ demo-1: 1 profile · checkpointed · \d+\.\d s$/
   end
 
   test "a --verbose launch prints setup.sh's lines as they come, before its step line",
@@ -584,7 +584,7 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert Enum.all?(lines, &(String.length(&1) < 100))
 
     assert [done, "  url"] = Enum.take(lines, -2)
-    assert done =~ ~r/^✓ demo: 6 profiles · 2 connectors admitted · checkpointed · \d+\.\d s$/
+    assert done =~ ~r/^✓ demo: 6 profiles · checkpointed · \d+\.\d s$/
     refute Enum.any?(lines, &(&1 =~ ~r/^(Launching|Sources:|Sprite: )/))
   end
 
@@ -726,7 +726,7 @@ defmodule SpriteProfiles.CLICommandsTest do
     }
 
     assert Commands.Launch.done_line(record) ==
-             "✓ demo: 4 profiles · 2 connectors admitted · checkpointed · 14.2 s"
+             "✓ demo: 4 profiles · checkpointed · 14.2 s"
 
     assert Commands.Launch.done_line(%{
              record
@@ -734,7 +734,7 @@ defmodule SpriteProfiles.CLICommandsTest do
                connectors: ["x"],
                checkpoint: nil
            }) ==
-             "✓ demo: 1 profile · 1 connector admitted · not checkpointed · 14.2 s"
+             "✓ demo: 1 profile · not checkpointed · 14.2 s"
   end
 
   test "an exception is one line and status 70, not a crashed VM", %{tmp_dir: tmp} do

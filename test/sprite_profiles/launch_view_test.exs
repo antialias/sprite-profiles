@@ -98,7 +98,7 @@ defmodule SpriteProfiles.LaunchViewTest do
              {:info, "✓ anthropic      0.0 s  connector api.anthropic.com"},
              {:info, "✓ preview        0.8 s  service preview :8080 · 1 file"},
              {:info, "✓ ./weekend      1.3 s  4 permissions · 1 skill"},
-             {:info, "✓ demo: 4 profiles · 1 connector admitted · checkpointed · 12.3 s"},
+             {:info, "✓ demo: 4 profiles · checkpointed · 12.3 s"},
              {:info, "  https://demo-1.sprites.app"}
            ]
   end
