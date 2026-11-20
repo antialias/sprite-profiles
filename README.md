@@ -4,12 +4,29 @@ Composable profiles for [Fly.io Sprites](https://sprites.dev). Pick a few, and a
 gets all of them, merged by rules that refuse rather than guess.
 
 ```sh
-mix profiles.launch -p claude-code -p playwright -p preview --name demo-1
+sprite-profiles launch claude-code playwright @antialias/shop-inventory --name demo-1
 ```
 
 A **profile** is a small folder: what to install, files to push, services to run, the
 network rules and connectors it needs, Claude Code skills and MCP servers, and whether it
 holds a credential.
+
+## Install
+
+Download `sprite-profiles` for your machine from the
+[latest release](https://github.com/antialias/sprite-profiles/releases/latest):
+`sprite-profiles-macos_arm64`, `sprite-profiles-linux_x86_64` or
+`sprite-profiles-linux_arm64`. It carries its own Erlang, so it needs nothing else; launching
+a Sprite also needs the [`sprite` command](https://docs.sprites.dev), signed in.
+
+```sh
+mv sprite-profiles-macos_arm64 /usr/local/bin/sprite-profiles
+chmod +x /usr/local/bin/sprite-profiles
+xattr -d com.apple.quarantine /usr/local/bin/sprite-profiles   # macOS: the binary is not notarized
+```
+
+From a checkout, every command is also a Mix task (Elixir 1.17 or later):
+`mix profiles.plan -p claude-code` is `sprite-profiles plan claude-code`.
 
 ## Why not a setup script?
 
@@ -58,13 +75,10 @@ yours, or when an agent is the one launching Sprites.
 
 ## Quick start: plan a set
 
-Planning needs no Sprite and no token. You need Elixir 1.17 or later.
+Planning needs no Sprite and no token. The example profiles ship inside the binary.
 
 ```sh
-git clone https://github.com/antialias/sprite-profiles
-cd sprite-profiles
-mix deps.get
-mix profiles.plan -p claude-code -p playwright
+sprite-profiles plan claude-code playwright
 ```
 
 The plan says what the Sprite will get, which profile each part comes from, and in what
@@ -102,18 +116,48 @@ MCP servers:
 ...
 ```
 
-`-p` is short for `--profile`; repeat it in the order the profiles should apply. A refused
-set exits 1 and prints one line per refusal: a code in brackets for programs, then a
+Name the profiles in the order they should apply (`-p NAME` works too, as in the Mix
+tasks). A refused set exits 1 and prints one line per refusal: a code in brackets for programs, then a
 sentence for people. `--agent` judges the set as an agent would launch it.
 
-### Use a published profile
+## Find a profile
 
-A profile doesn't have to be on your machine. Pick it by its address on GitHub, in the
-form GitHub Actions uses: `owner/repo/path@ref`. The ref is a tag, a branch or a commit,
-and it is required. This repository's own `preview`, fetched from GitHub:
+Published profiles are git repositories that follow a naming convention, so nothing is
+hosted. Search GitHub for them:
+
+```
+$ sprite-profiles search shop
+@antialias/shop-inventory  1.0.0  ★0  A woodworking shop's tool inventory over MCP, read-only; no key in the Sprite · connector woodworking.haunt.house /mcp, allows api.sprites.dev
+```
+
+Each line ends with what the profile can touch. `sprite-profiles show @antialias/shop-inventory`
+prints all of it: the connector and its endpoints, the network rules, MCP servers, env,
+skills, whether it runs a `setup.sh`, and whether it is privileged.
+
+Pick a published profile by name. `@antialias/shop-inventory` is the newest version;
+`@antialias/shop-inventory@1` the newest 1.x, as are `@1.2` and `@1.2.3` at their level; a
+branch or a commit (`@main`) works while a profile is in development.
+
+### A project's set
 
 ```sh
-mix profiles.plan -p claude-code -p antialias/sprite-profiles/profiles/preview@main
+sprite-profiles add claude-code @antialias/shop-inventory
+sprite-profiles lock
+sprite-profiles launch --lock sprite-profiles.lock --name demo-2
+```
+
+`add` writes `sprite-profiles.toml`, this project's set, with each name at its major
+version (`@1`), like npm's `^`. In a folder holding that file, `plan`, `lock` and `launch`
+take no picks. `lock` writes `sprite-profiles.lock` (below); commit both.
+
+### By address
+
+A profile can also be picked by its address, in the form GitHub Actions uses:
+`owner/repo/path@ref`. The ref is a tag, a branch or a commit, and it is required. This
+repository's own `preview`, fetched from GitHub:
+
+```sh
+sprite-profiles plan claude-code antialias/sprite-profiles/profiles/preview@main
 ```
 
 The plan gains a Sources section, so you see where the code comes from before it runs:
@@ -138,14 +182,15 @@ in `~/.cache/sprite-profiles/`. A branch moves, so pin the set before you
 launch it:
 
 ```sh
-mix profiles.lock -p claude-code -p antialias/sprite-profiles/profiles/preview@main
-mix profiles.launch --lock sprite-profiles.lock --name demo-3
-mix profiles.plan --lock sprite-profiles.lock --offline
+sprite-profiles lock claude-code antialias/sprite-profiles/profiles/preview@main
+sprite-profiles launch --lock sprite-profiles.lock --name demo-3
+sprite-profiles plan --lock sprite-profiles.lock --offline
 ```
 
-`mix profiles.lock` writes `sprite-profiles.lock`: the set, with every address pinned to a
-commit. A launch from the lock uses those commits and looks nothing up. Run
-`mix profiles.lock` again to move to the newest commits; it prints each one that changed.
+`sprite-profiles lock` writes `sprite-profiles.lock`: the set, with every name and address
+pinned to a commit, and each name's version. A launch from the lock uses those commits and
+looks nothing up. Run `lock` again to move to the newest versions and commits; it prints
+each one that changed.
 `--offline` calls nothing, and works once the commits are cached.
 
 A fetched profile's `setup.sh` runs with the Sprite's full access, like your own. Read the
@@ -242,6 +287,36 @@ Some rules worth knowing before you write more:
 [docs/SPEC.md](docs/SPEC.md) has every field, merge rule and refusal code. `--dir`
 (repeatable) or `SPRITE_PROFILES_PATH` (colon-separated) replaces the search path. The same
 name found in two folders is refused, so your profile never silently shadows an example.
+
+## Publish a profile
+
+A published profile is a public git repository, found by its name:
+
+| you publish | people pick |
+|---|---|
+| a repository `owner/sprite-profile-NAME`, with `profile.toml` at its root | `@owner/NAME` |
+| a folder `NAME/` or `profiles/NAME/` in your collection, `owner/sprite-profiles` | `@owner/NAME` |
+| a line `NAME = "REPO/path"` in your collection's `links.toml`, pointing into another of your repositories, such as a monorepo | `@owner/NAME` |
+
+Versions are tags: `v1.0.0` for a profile at a repository's root, `<folder>/v1.0.0` for one
+in a folder (`profiles/linear/v1.0.0`). Give the repository the topic `sprite-profile` so
+`sprite-profiles search` finds it:
+
+```sh
+git tag -a v1.0.0 -m "linear 1.0.0" && git push origin v1.0.0
+gh repo edit --add-topic sprite-profile
+```
+
+A profile's label and connector name follow its publisher: `@acme/linear` is
+`profile:acme.linear`, and only a repository owned by `acme` can give it.
+[sprite-profile-shop-inventory](https://github.com/antialias/sprite-profile-shop-inventory) is a
+complete example, published by the service it connects to.
+
+**Other git hosts.** The same layout works on any git server. On a self-hosted Gitea,
+`@git.example.com/team/linear` finds `team/sprite-profile-linear` there; a first part
+holding a `.` is a host. It is fetched with `git`, through the credentials your git already
+has, so a private repository works and sprite-profiles never asks for a password. Search
+covers GitHub only.
 
 ## Inputs and a company's API
 
@@ -391,10 +466,12 @@ on a real Sprite. Format 2 adds inputs and custom API connectors, with
 `mix profiles.connect`. `github-mcp` has been launched with a real GitHub token: Claude
 Code in the Sprite connected to GitHub's MCP server, its inputs chose the read-only
 toolsets, and the token never entered the Sprite. A service has published its own
-profile, [antialias/shop-inventory-profile](https://github.com/antialias/shop-inventory-profile):
-picked by address, it gave Claude Code in a Sprite read-only access to a shop's
-inventory through a connector. Next come the MCP server for agents and a
-web catalogue for picking a set.
+profile, [`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory):
+picked by name, it gave Claude Code in a Sprite read-only access to a shop's
+inventory through a connector. Published profiles are
+found by name (`@owner/name@1`), on GitHub or any git server, searched on GitHub, and kept
+per project in `sprite-profiles.toml`; the `sprite-profiles` command runs them with no
+Erlang installed. Next come the MCP server for agents and a web catalogue for picking a set.
 
 - [docs/SPEC.md](docs/SPEC.md): the profile format, the merge rules and the launch sequence.
 - [docs/RESULTS.md](docs/RESULTS.md): step timings on real Sprites.
