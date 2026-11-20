@@ -252,6 +252,11 @@ defmodule SpriteProfiles.CLI do
     if System.get_env("ERL_CRASH_DUMP_SECONDS") in [nil, ""],
       do: System.put_env("ERL_CRASH_DUMP_SECONDS", "0")
 
+    # Output is UTF-8 (★, ·, ✓) whatever the locale: with no LANG, as in `env -i` or a bare
+    # container, the VM would otherwise write it as latin1 and garble it.
+    :io.setopts(:standard_io, encoding: :unicode)
+    :io.setopts(:standard_error, encoding: :unicode)
+
     System.halt(run_main(argv()))
   end
 
