@@ -61,7 +61,7 @@ defmodule SpriteProfiles.Commands.Launch do
         summary(out, record)
         Out.error(out, "Failed at #{step_name(record.error)}: #{record.error.message}")
 
-        unless opts[:destroy_on_failure] or record.steps == [] do
+        unless opts[:destroy_on_failure] || record.steps == [] do
           Out.error(
             out,
             "The Sprite #{record.name} was left as it is; destroy it with: sprite destroy --force #{record.name}"

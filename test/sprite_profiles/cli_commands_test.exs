@@ -410,6 +410,35 @@ defmodule SpriteProfiles.CLICommandsTest do
     assert step =~ ~r/^\s+\d+\.\d\d s  enter ABCD-1234$/
   end
 
+  test "a failed setup.sh ends the launch with its error and how to destroy the Sprite",
+       %{tmp_dir: tmp} do
+    respond = fn
+      {:exec, [_, ["bash", "-c", s], _opts]} ->
+        if s =~ "run-setup.sh\" ",
+          do: {:ok, %{status: 1, output: "the code expired\n"}},
+          else: :default
+
+      _ ->
+        :default
+    end
+
+    {sprites, _log} = FakeSprites.start(respond)
+    test = self()
+
+    out = %SpriteProfiles.Out{
+      info: &send(test, {:info, &1}),
+      error: &send(test, {:error, &1}),
+      usage: & &1
+    }
+
+    opts = [dirs: [@profiles], name: "demo-1", sprites: sprites, state_dir: Path.join(tmp, "l")]
+
+    assert Commands.Launch.run(["claude-code"], opts, out) == 1
+    errors = for {:error, l} <- Process.info(self(), :messages) |> elem(1), do: l
+    assert Enum.any?(errors, &(&1 =~ "Failed at setup claude-code"))
+    assert Enum.any?(errors, &(&1 =~ "destroy it with: sprite destroy --force demo-1"))
+  end
+
   test "the launch summary ends with one line for a recording" do
     record = %{
       name: "demo",
