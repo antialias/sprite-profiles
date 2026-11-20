@@ -11,30 +11,29 @@ A **profile** is a small folder: what to install, files to push, services to run
 network rules and connectors it needs, Claude Code skills and MCP servers, and whether it
 holds a credential.
 
-![Seven profiles composed into one Sprite: a project's own task profile, a shop's published inventory profile and five bundled ones; a conflicting profile refused; a launch in 60 s; Claude building a page from the shop's inventory](demo/demo.gif)
+![A project's sprite-profiles.toml lists seven profiles; one command launches a Sprite with all of them; Claude, asked inside it, builds a page from the shop's real inventory](demo/demo.gif)
 
-*One take, run for real. A project's own profile, [`./weekend`](demo/weekend), holds its task
-as a skill and the narrow permissions Claude needs for it. It composes with a shop's profile
-published on GitHub and five bundled ones: Claude Code, its model through a Fly connector,
-GitHub's MCP server, Playwright and a web preview. A profile that would set the model's key a
-second way is refused. The Sprite launches with three connectors and no key inside, and Claude
-builds the page below from the shop's real inventory. Pauses over 2 s are cut; the times on
-screen are real. The org name is redacted. Script: [`demo/demo.sh`](demo/demo.sh).*
+*Run for real; pauses over 2 s are cut, and the times on screen are real. The project's own
+profile, [`./weekend`](demo/weekend), brings the task and the permissions Claude needs for it.
+[`@antialias/shop-inventory`](https://github.com/antialias/sprite-profile-shop-inventory) is
+published by the shop, and the other five ship with sprite-profiles. No key is inside the
+Sprite: Fly's gateway adds them on the way out. Script: [`demo/demo.sh`](demo/demo.sh).*
 
 <a href="demo/weekend.png"><img src="demo/weekend-page.png" width="560" alt="The page Claude built in the Sprite, at phone size: three weekend projects using the shop's real tools, and a table of how it was made, showing a placeholder key, the shop unreachable directly (000) and the gateway refusing other paths (403)"></a>
 
-*The page, as Playwright screenshotted it in that Sprite: the top, and the end, where Claude
+*What Claude built, screenshotted by Playwright in that Sprite: the top, and the end, where it
 reports the Sprite's checks. [The whole page](demo/weekend.png).*
 
 **Swap one profile** and Claude's model goes through [Apiary](https://apiary.wtf)'s HTTPS
-proxy instead of Fly's connector; the shop still goes through the gateway.
-[`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) enrols the Sprite
-as a device that someone approves:
+proxy instead of Fly's connector.
+[`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) enrols the Sprite as
+a device that someone approves; the time on its line is mostly that wait.
 
-![Launching claude-code, @antialias/apiary and the shop: the Sprite shows a sign-in code, is approved, and Claude answers through Apiary's proxy](demo/apiary.gif)
+![The project swaps anthropic for @antialias/apiary, launches, waits for the Sprite to be approved as an Apiary device, and Claude answers through Apiary's proxy](demo/apiary.gif)
 
-*Run for real, pauses over 2 s cut (the wait for approval among them). The org name and the
-shop owner's name, from the shop's notes, are redacted. Script: [`demo/apiary.sh`](demo/apiary.sh).*
+**Profiles that disagree are refused**, never merged silently:
+
+![sprite-profiles plan claude-code anthropic anthropic-key is refused, because both profiles set ANTHROPIC_API_KEY](demo/conflict.gif)
 
 ## Install
 
