@@ -11,12 +11,30 @@ A **profile** is a small folder: what to install, files to push, services to run
 network rules and connectors it needs, Claude Code skills and MCP servers, and whether it
 holds a credential.
 
-![Finding a shop's published profile, launching a Sprite with Claude Code, its model and the shop in 7 seconds, asking Claude what to build, and checking the Sprite holds no key](demo/demo.gif)
+![Seven profiles composed into one Sprite: a project's own task profile, a shop's published inventory profile and five bundled ones; a conflicting profile refused; a launch in 60 s; Claude building a page from the shop's inventory](demo/demo.gif)
 
-*One take, run for real: search GitHub for a profile, launch a Sprite with Claude Code, its
-model and a shop's inventory, each through a Fly connector, ask Claude in the Sprite, then
-show that the Sprite holds a placeholder rather than the key and can't reach the shop
-directly. [`demo/demo.sh`](demo/demo.sh) is the script; the org name is redacted.*
+*One take, run for real. A project's own profile, [`./weekend`](demo/weekend), holds its task
+as a skill and the narrow permissions Claude needs for it. It composes with a shop's profile
+published on GitHub and five bundled ones: Claude Code, its model through a Fly connector,
+GitHub's MCP server, Playwright and a web preview. A profile that would set the model's key a
+second way is refused. The Sprite launches with three connectors and no key inside, and Claude
+builds the page below from the shop's real inventory. Pauses over 2 s are cut; the times on
+screen are real. The org name is redacted. Script: [`demo/demo.sh`](demo/demo.sh).*
+
+<a href="demo/weekend.png"><img src="demo/weekend-page.png" width="560" alt="The page Claude built in the Sprite, at phone size: three weekend projects using the shop's real tools, and a table of how it was made, showing a placeholder key, the shop unreachable directly (000) and the gateway refusing other paths (403)"></a>
+
+*The page, as Playwright screenshotted it in that Sprite: the top, and the end, where Claude
+reports the Sprite's checks. [The whole page](demo/weekend.png).*
+
+**Swap one profile** and Claude's model goes through [Apiary](https://apiary.wtf)'s HTTPS
+proxy instead of Fly's connector; the shop still goes through the gateway.
+[`@antialias/apiary`](https://github.com/antialias/sprite-profile-apiary) enrols the Sprite
+as a device that someone approves:
+
+![Launching claude-code, @antialias/apiary and the shop: the Sprite shows a sign-in code, is approved, and Claude answers through Apiary's proxy](demo/apiary.gif)
+
+*Run for real, pauses over 2 s cut (the wait for approval among them). The org name and the
+shop owner's name, from the shop's notes, are redacted. Script: [`demo/apiary.sh`](demo/apiary.sh).*
 
 ## Install
 

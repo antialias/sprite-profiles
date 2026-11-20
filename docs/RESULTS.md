@@ -407,3 +407,34 @@ and it fetched a profile from GitHub over HTTPS with the certificates in the rel
 - **Release `v0.1.0`**: the tag's workflow built and attached `macos_arm64`, `linux_x86_64`
   and `linux_arm64` binaries with SHA-256 files. A push of more than three tags at once
   starts no workflow on GitHub, so `v0.1.0` went up on its own.
+
+## Seven profiles in one Sprite, and the Apiary swap
+
+20 Nov 2026, the binary built from this commit's code, on macOS arm64.
+
+- **The composition demo** ([`demo/demo.sh`](../demo/demo.sh)): `claude-code`, `anthropic`,
+  `@antialias/shop-inventory` (published on GitHub), `github-mcp`, `playwright`, `preview`
+  and the project's own `./weekend` (a path pick: the task as a skill, and nine permission
+  rules). The launch took 59.5 s, 41 s of it Playwright's install, with three connectors
+  admitted. Adding `anthropic-key` to the project file made `plan` refuse the set
+  (`env_collision` on `ANTHROPIC_API_KEY`); removing it cleared the refusal.
+- **Claude's page:** `claude -p "Build the weekend page."` took 83 s in a trial and about as
+  long on camera. The page uses the shop's MCP server for three projects with real tool names
+  and specs, flags unverified specs, and reads the footer's commit through GitHub's MCP
+  server. Its own checks: the only credential-like variables were the placeholder
+  `ANTHROPIC_API_KEY` and one Claude Code sets for itself; the shop called directly gave
+  `000`; the gateway refused a path other than `/mcp` with `403`.
+- **What the shop's data leaks.** The shop's notes name its owner and list household bikes.
+  The trial page put the owner's name in its header and a bike shopping list on the page, so
+  the task skill now says to name no one and leave the bikes out. Claude's answer in the
+  Apiary clip still quoted the owner by name; the recording shows `[owner]`.
+- **Live setup output** made Playwright's install print some 640 progress lines; its setup
+  now keeps them in a log and prints it only on failure.
+- **`sprite exec` can't carry a large file:** a 560 KB screenshot over stdout failed with
+  "cannot resume output at byte 0: earliest retained byte is 507723". `sprite file pull` works.
+- **The Apiary swap** ([`demo/apiary.sh`](../demo/apiary.sh)): `claude-code`,
+  `@antialias/apiary` and the shop. Setup waited for the device's approval at
+  apiary.wtf/devices, then `apiary doctor` passed; the launch took 80.3 s, 70 s of it the
+  sign-in. `claude -p` answered through the proxy from the shop's inventory. A first take,
+  approved by no one, ended when the code expired after 10 minutes, and showed that a failed
+  setup crashed the launch's last message (`nil or …`); fixed, with a test.

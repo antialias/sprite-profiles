@@ -1,0 +1,19 @@
+name        = "weekend"
+summary     = "This project's task, a page of weekend projects, and what Claude may use for it"
+description = """
+The demo's project profile. It brings the task, as a skill, and the narrow permissions \
+Claude Code needs for it: the shop's and GitHub's MCP tools, edits under ~/site, a few read \
+commands and Playwright's screenshot. Everything else comes from the other profiles."""
+
+[claude.settings.permissions]
+allow = [
+  "Skill",
+  "mcp__shop",
+  "mcp__github",
+  "Edit(~/site/**)",
+  "Bash(curl:*)",
+  "Bash(env:*)",
+  "Bash(grep:*)",
+  "Bash(head:*)",
+  "Bash(npx playwright screenshot:*)",
+]
