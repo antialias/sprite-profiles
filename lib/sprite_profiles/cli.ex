@@ -23,7 +23,10 @@ defmodule SpriteProfiles.CLI do
 
   With no `--dir` and no `SPRITE_PROFILES_PATH`, the search path is the example profiles
   bundled in the release (`priv/profiles`) plus `~/.config/sprite-profiles/profiles` when it
-  exists, so a bare name works from any directory.
+  exists, so a bare name works from any directory. A path pick (`./weekend`) names a profile
+  folder directly and leaves the search path as it is, so a project's own profile composes
+  with the bundled ones; a relative one is taken from the working directory, or from the
+  project file's folder when it comes from that file.
   """
 
   alias SpriteProfiles.{Commands, Lock, Merge, Out, Pick, ProfilePath, ProjectFile}
@@ -56,8 +59,10 @@ defmodule SpriteProfiles.CLI do
                         sprite-profiles lock
     help [COMMAND]    this text, or one command's options
 
-  A PICK is a profile, written one of three ways:
+  A PICK is a profile, written one of four ways:
     claude-code                 a profile on the search path (the examples ship inside)
+    ./weekend                   a profile folder by path (./, ../, / or ~/), beside the
+                                search path; relative to sprite-profiles.toml when in it
     @owner/name[@version]       a published profile on GitHub: the newest version, or
                                 the newest of a major or minor, or a branch, as in
                                 @acme/linear, @acme/linear@1, @acme/linear@1.2, @acme/linear@main
@@ -420,11 +425,16 @@ defmodule SpriteProfiles.CLI do
           true -> {Path.expand(Lock.default_path(), cwd), Lock.default_path()}
         end
 
+      # A relative path pick is recorded relative to the lock's folder, where it is read.
+      lock_dir = Path.dirname(output)
+      picks = Enum.map(picks, &Pick.rebase(&1, set_opts[:base] || cwd, lock_dir))
+
       command_opts = [
         dirs: dirs(opts),
         output: output,
         shown: shown,
-        inputs: set_opts[:inputs] || %{}
+        inputs: set_opts[:inputs] || %{},
+        base: lock_dir
       ]
 
       Commands.Lock.run(picks, command_opts, out)
@@ -433,17 +443,18 @@ defmodule SpriteProfiles.CLI do
 
   defp run_command("connect", opts, out, ctx) do
     with {:ok, pick} <- one_pick(opts, out) do
-      command_opts = [dirs: dirs(opts), adapter: opts[:adapter]]
+      command_opts = [dirs: dirs(opts), adapter: opts[:adapter], base: ctx[:cwd]]
       Commands.Connect.run(pick, command_opts, out, ctx[:connect] || [])
     end
   end
 
-  defp run_command("show", opts, out, _ctx) do
+  defp run_command("show", opts, out, ctx) do
     with {:ok, pick} <- one_pick(opts, out) do
       command_opts = [
         dirs: dirs(opts),
         bundled: bundled_profiles(),
-        offline: opts[:offline] || false
+        offline: opts[:offline] || false,
+        base: ctx[:cwd]
       ]
 
       Commands.Show.run(pick, command_opts, out)
@@ -509,7 +520,9 @@ defmodule SpriteProfiles.CLI do
         from_file(opts, project, file, out)
 
       _ ->
-        set_args(opts, out, nil)
+        with {:ok, picks, set_opts, nil} <- set_args(opts, out, nil) do
+          {:ok, picks, Keyword.put_new(set_opts, :base, ctx[:cwd]), nil}
+        end
     end
   end
 
@@ -519,7 +532,8 @@ defmodule SpriteProfiles.CLI do
     case set_args(profiles ++ opts, out, file) do
       {:ok, picks, set_opts, file} ->
         inputs = Map.merge(project.inputs, set_opts[:inputs] || %{})
-        {:ok, picks, Keyword.put(set_opts, :inputs, inputs), file}
+        set_opts = Keyword.merge(set_opts, inputs: inputs, base: Path.dirname(file))
+        {:ok, picks, set_opts, file}
 
       status ->
         status
@@ -544,7 +558,8 @@ defmodule SpriteProfiles.CLI do
   defp add(picks, dirs, out, file) do
     with {:ok, project} <- read_project(file, out),
          :ok <- or_refused(Merge.check_picks(picks), out),
-         {:ok, profiles} <- or_refused(Resolver.find(picks, dirs), out) do
+         {:ok, profiles} <-
+           or_refused(Resolver.find(picks, dirs, base: Path.dirname(file)), out) do
       written = Enum.map(profiles, &written_pick/1)
       profiles_after = ProjectFile.add(project.profiles, written)
 

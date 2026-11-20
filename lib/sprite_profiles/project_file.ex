@@ -12,6 +12,9 @@ defmodule SpriteProfiles.ProjectFile do
   would pass. With no picks on the command line, `plan`, `launch` and `lock` read the file
   in the working directory, and `lock` writes `sprite-profiles.lock` beside it.
 
+  A path pick (`./weekend`, a project's own profile) is written relative to the file's
+  folder and resolved from there.
+
   `add/2` and `remove/2` change the `profiles` list and keep the rest of the file's text,
   comments included, when they can; otherwise they write the file afresh.
   """
@@ -84,7 +87,8 @@ defmodule SpriteProfiles.ProjectFile do
 
   @doc """
   What makes two picks the same profile, ignoring the version or ref: a name's
-  `@HOST/NS/NAME`, an address's repository and folder, or a local name.
+  `@HOST/NS/NAME`, an address's repository and folder, a local name, or a path as written
+  with `.` segments and trailing slashes dropped (`SpriteProfiles.Pick.path_identity/1`).
   """
   def identity(pick) do
     case Pick.kind(pick) do
@@ -102,6 +106,9 @@ defmodule SpriteProfiles.ProjectFile do
 
       :local ->
         pick
+
+      :path ->
+        Pick.path_identity(pick)
     end
   end
 

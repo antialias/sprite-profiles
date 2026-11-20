@@ -14,7 +14,7 @@ defmodule SpriteProfiles.SetArgs do
 
   @doc """
   Returns `{:ok, picks, resolve_opts}` (with `:inputs`, `:offline` and, from a lock,
-  `:pins`), `{:usage, message}` when neither `--profile` nor `--lock` is given, both are,
+  `:pins` and `:base`, the lock's folder, which its path picks are relative to), `{:usage, message}` when neither `--profile` nor `--lock` is given, both are,
   `--lock` comes with `-i`, or an `-i` is not `name=value`; or `{:error, refusals}` when
   the lock cannot be read.
   """
@@ -36,7 +36,10 @@ defmodule SpriteProfiles.SetArgs do
 
       {_, lock, _} when is_binary(lock) ->
         with {:ok, %{picks: entries, inputs: inputs}} <- Lock.load(lock) do
-          {:ok, Lock.picks(entries), [pins: Lock.pins(entries), inputs: inputs] ++ offline}
+          base = lock |> Path.expand() |> Path.dirname()
+
+          {:ok, Lock.picks(entries),
+           [pins: Lock.pins(entries), inputs: inputs, base: base] ++ offline}
         end
 
       {profiles, nil, given} ->

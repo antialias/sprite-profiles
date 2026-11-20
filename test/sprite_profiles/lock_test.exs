@@ -50,7 +50,7 @@ defmodule SpriteProfiles.LockTest do
 
     for {why, text} <- [
           {"not TOML", "format = = 1"},
-          {"newer format", String.replace(good, "format    = 1", "format = 4")},
+          {"newer format", String.replace(good, "format    = 1", "format = 5")},
           {"no format", String.replace(good, "format    = 1", "")},
           {"missing sha", String.replace(good, ~s(sha   = "#{sha1()}"\n), "")},
           {"short sha", String.replace(good, sha1(), "1a2b3c4")},

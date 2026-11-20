@@ -1,7 +1,9 @@
 defmodule SpriteProfiles.Resolver do
   @moduledoc """
   Turns a set's picks into profiles (`SpriteProfiles.Pick.kind/1` tells them apart). A
-  local name is looked up on the search path (`SpriteProfiles.ProfilePath`); an address
+  local name is looked up on the search path (`SpriteProfiles.ProfilePath`); a path pick
+  (`./x`, `../x`, `/x`, `~/x`) is loaded from that folder as a local profile is, without
+  the search path; an address
   (`[HOST/]owner/repo[/path]@ref`) is resolved to a commit, fetched into the cache and read
   from there (`SpriteProfiles.Host`); a name pick (`@[HOST/]owner/name[@version]`) is first
   found by convention (`SpriteProfiles.Names`), then fetched like the address it stands
@@ -22,7 +24,8 @@ defmodule SpriteProfiles.Resolver do
 
   Options: `:pins`, a map from pick to `%{sha: sha, name: name}` (from a lock: the ref is
   not resolved, and the profile must declare that name; a name pick's pin also holds its
-  `owner`, `repo`, `path`, `ref` and `version`, so no name is resolved); `:offline`; and the
+  `owner`, `repo`, `path`, `ref` and `version`, so no name is resolved); `:base`, the folder
+  a relative path pick is taken from (default the working directory); `:offline`; and the
   `SpriteProfiles.GitHub`, `SpriteProfiles.Git` and `SpriteProfiles.Host` options
   (`:cache_dir`, `:req_options`, `:git_hosts`, ...).
   """
@@ -36,6 +39,7 @@ defmodule SpriteProfiles.Resolver do
       Enum.map(picks, fn pick ->
         case Pick.kind(pick) do
           :local -> ProfilePath.find_one(pick, dirs)
+          :path -> ProfilePath.load_path(pick, opts[:base] || File.cwd!())
           :address -> find_address(pick, opts)
           :name -> find_name(pick, opts)
         end

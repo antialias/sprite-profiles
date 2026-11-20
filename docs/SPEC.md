@@ -39,6 +39,18 @@ path: the same name in two folders is refused (`profile_ambiguous`), naming both
 rather than one silently shadowing the other. A folder on the path that does not exist is
 refused (`profile_dir_missing`).
 
+A pick starting with `./`, `../`, `/` or `~/` is a **path** to one profile folder, and
+leaves the search path as it is: `--dir` and `SPRITE_PROFILES_PATH` replace the path, but a
+path pick does not, so `sprite-profiles plan claude-code ./demo/weekend` still finds
+`claude-code` among the examples. `~/` is the home folder; a relative path is taken from the
+working directory on the command line, and from the folder of the `sprite-profiles.toml` or
+lock that holds it. The folder is loaded exactly as one on the search path is, with the same
+checks (its name must be the folder's, `name_mismatch`; the same file and symlink rules). It
+is a local profile: its qualified name and label are its name (`profile:weekend`), and a set
+holding it and a search-path profile of the same name is a `profile_collision`. A path with
+no folder is refused with `profile_not_found`, naming the path; a folder without
+`profile.toml` with `missing_profile_toml`.
+
 Secrets for privileged profiles are read from `~/.config/sprite-profiles/secrets/<NAME>`,
 or the folder `--secrets-dir` names.
 
@@ -104,6 +116,19 @@ reader refuses it with one `unsupported_format`. A lock holding inputs is `forma
 readonly = "false"
 ```
 
+A path pick is recorded as a local one is, by its `pick` alone, with the path as written and
+no commit; a relative one is read from the lock's folder (`lock --output` elsewhere rewrites
+it to name the same folder from there). A lock holding one is `format = 4`, so an older
+launcher asks to be upgraded instead of reading the path as an address; a path in a lock of
+an older format is `bad_lock`.
+
+```toml
+format    = 4
+
+[[picks]]
+pick = "./weekend"                   # path: resolved from the lock's folder at use
+```
+
 There is no publisher allowlist: a fetched profile's `setup.sh` runs with the Sprite's full
 access, like any other. What the set fetches is shown instead: the plan's **Sources**
 section, after the apply order and only when the set holds an address or a name, names each
@@ -128,11 +153,13 @@ tags.
 | pick | kind |
 |---|---|
 | `claude-code` | local, on the search path |
+| `./weekend`, `../shared/weekend`, `/srv/profiles/weekend`, `~/profiles/weekend` | a path to a profile folder, loaded as a local profile |
 | `@acme/linear`, `@acme/linear@1`, `@acme/linear@1.2`, `@acme/linear@1.2.3`, `@acme/linear@main` | a name |
 | `acme/profiles/linear@v1` | an address |
 
-A leading `@` makes a name; otherwise a `/` or an `@` makes an address; otherwise the pick
-is local. In a name, `owner` is a GitHub owner (compared case-insensitively) and `name` a
+A leading `@` makes a name; a leading `./`, `../`, `/` or `~/` makes a path (see "Where
+profiles are found"); otherwise a `/` or an `@` makes an address; otherwise the pick is
+local. No name or address starts with a path's prefix, so nothing changes meaning. In a name, `owner` is a GitHub owner (compared case-insensitively) and `name` a
 profile name. A first segment holding a `.` or a `:` is a host, `@HOST/NS/NAME[@V]`:
 `github.com` is the same as no host, and any other host is found with git (see "Profiles on
 other git hosts"). A malformed name is `bad_name`.
@@ -426,7 +453,8 @@ union where that is safe, refusal where two profiles disagree. Nothing is picked
 | bounds | 1 to 8 picks, none repeated (an address repeated at another ref, or a name at another version, counts), every pick a valid name, address or published name; no two with one qualified name | `no_profiles`, `too_many_profiles`, `duplicate_pick`, `bad_name`, `bad_address`, `address_needs_ref`, `profile_collision` |
 | names | each published name is found by convention and its version chosen before merging (see Profiles by name) | `name_not_found`, `name_ambiguous`, `bad_links`, `no_versions`, `version_not_found` |
 
-A pick that names no folder on the search path is refused with `profile_not_found`, one found
+A pick that names no folder on the search path, or a path pick naming no folder, is refused
+with `profile_not_found`, one found
 in two folders with `profile_ambiguous`; a profile that fails
 validation is reported with its validation codes.
 

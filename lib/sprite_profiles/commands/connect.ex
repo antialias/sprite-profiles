@@ -20,7 +20,7 @@ defmodule SpriteProfiles.Commands.Connect do
   @doc "Connects the profile `pick`; returns the exit status."
   @spec run(String.t(), keyword(), Out.t(), keyword()) :: non_neg_integer()
   def run(pick, opts, %Out{} = out, deps \\ []) do
-    case Connect.load(pick, dirs: Keyword.fetch!(opts, :dirs)) do
+    case Connect.load(pick, dirs: Keyword.fetch!(opts, :dirs), base: opts[:base]) do
       {:ok, profile, connector} ->
         Out.info(out, Enum.join(Connect.summary(profile, connector), "\n"))
         terminal? = Keyword.get(deps, :terminal?, &terminal?/0)

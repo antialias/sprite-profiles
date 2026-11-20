@@ -22,7 +22,8 @@ defmodule SpriteProfiles.Merge do
 
   @doc """
   Checks the picks alone (count, repeats, spelling), before any profile is read. A pick is a
-  profile name, an address (`owner/repo[/path]@ref`) or a name pick (`@owner/name[@V]`); see
+  profile name, a path to a profile folder (`./x`), an address (`owner/repo[/path]@ref`) or a
+  name pick (`@owner/name[@V]`); see
   `SpriteProfiles.Pick`. The same address at two refs, or the same name at two versions, is
   a repeat.
   """
@@ -84,6 +85,7 @@ defmodule SpriteProfiles.Merge do
       :address -> address_problem(pick)
       :name -> name_problem(pick)
       :local -> local_problem(pick)
+      :path -> []
     end
   end
 
@@ -161,6 +163,9 @@ defmodule SpriteProfiles.Merge do
 
       :local ->
         pick
+
+      :path ->
+        Pick.path_identity(pick)
     end
   end
 

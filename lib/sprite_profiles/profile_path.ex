@@ -11,7 +11,7 @@ defmodule SpriteProfiles.ProfilePath do
   (`profile_ambiguous`), naming both paths, rather than one shadowing the other.
   """
 
-  alias SpriteProfiles.{Profile, Refusal}
+  alias SpriteProfiles.{Pick, Profile, Refusal}
 
   @env "SPRITE_PROFILES_PATH"
   @repo_dir "profiles"
@@ -65,6 +65,31 @@ defmodule SpriteProfiles.ProfilePath do
 
   defp errors({:error, e}), do: e
   defp errors(_), do: []
+
+  @doc """
+  Loads the profile folder a path pick names (`SpriteProfiles.Pick.resolve_path/2`, with
+  relative paths taken from `base`), with the checks a folder on the search path gets: its
+  name must be the folder's. The profile's pick is the path as written; its qualified name
+  is its name, as for any local profile.
+  """
+  @spec load_path(String.t(), Path.t()) ::
+          {:ok, Profile.t()} | {:error, [Refusal.t() | Profile.Error.t()]}
+  def load_path(pick, base) do
+    dir = Pick.resolve_path(pick, base)
+
+    if File.dir?(dir) do
+      with {:ok, profile} <- Profile.load(dir, display: pick), do: {:ok, %{profile | pick: pick}}
+    else
+      {:error,
+       [
+         Refusal.new(
+           :profile_not_found,
+           [pick],
+           "there is no profile folder at #{dir} (picked as #{pick}); check the path."
+         )
+       ]}
+    end
+  end
 
   @doc "Finds and loads one profile by name along `dirs`."
   @spec find_one(String.t(), [Path.t()]) ::

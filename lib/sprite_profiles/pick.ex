@@ -4,6 +4,8 @@ defmodule SpriteProfiles.Pick do
 
     * a **name**, `@[HOST/]NS/NAME[@V]`, starts with `@`: a published profile found by
       convention (`SpriteProfiles.Names`);
+    * a **path**, starting with `./`, `../`, `/` or `~/`: a profile folder on disk, loaded as
+      a local profile without touching the search path (`resolve_path/2`);
     * an **address**, `owner/repo[/path]@ref`, holds a `/` or an `@`
       (`SpriteProfiles.Address`);
     * anything else is **local**, a profile name on the search path.
@@ -46,14 +48,82 @@ defmodule SpriteProfiles.Pick do
   def github, do: @github
 
   @doc """
-  The kind of pick: `:name` when it starts with `@`; otherwise `:address` when it holds a
-  `/` or an `@`; otherwise `:local`.
+  The kind of pick: `:name` when it starts with `@`; `:path` when it starts with `./`,
+  `../`, `/` or `~/`; otherwise `:address` when it holds a `/` or an `@`; otherwise
+  `:local`.
   """
-  @spec kind(String.t()) :: :local | :name | :address
+  @spec kind(String.t()) :: :local | :name | :address | :path
   def kind("@" <> _), do: :name
+  def kind("./" <> _), do: :path
+  def kind("../" <> _), do: :path
+  def kind("/" <> _), do: :path
+  def kind("~/" <> _), do: :path
 
   def kind(pick) when is_binary(pick),
     do: if(String.contains?(pick, ["/", "@"]), do: :address, else: :local)
+
+  @doc """
+  The folder a path pick names: `~/` is the home folder, and a relative path (`./`, `../`)
+  is taken from `base`, the folder it was written in (the working directory on the command
+  line, the project file's or the lock's folder when it comes from one).
+  """
+  @spec resolve_path(String.t(), Path.t()) :: Path.t()
+  def resolve_path("~/" <> _ = pick, _base), do: Path.expand(pick)
+  def resolve_path(pick, base), do: Path.expand(pick, base)
+
+  @doc """
+  What makes two path picks the same folder as written: the path with `.` segments,
+  repeated and trailing slashes dropped and `dir/..` folded, keeping how it starts
+  (`/`, `~/`, or relative). It reads no disk, so two spellings through a symlink differ.
+  """
+  @spec path_identity(String.t()) :: String.t()
+  def path_identity(pick) do
+    {root, rest} =
+      case pick do
+        "/" <> rest -> {"/", rest}
+        "~/" <> rest -> {"~/", rest}
+        rest -> {"./", rest}
+      end
+
+    segments =
+      rest
+      |> String.split("/", trim: true)
+      |> Enum.reduce([], fn
+        ".", acc -> acc
+        "..", [top | acc] when top != ".." -> acc
+        "..", acc when root == "./" -> [".." | acc]
+        "..", acc -> acc
+        seg, acc -> [seg | acc]
+      end)
+      |> Enum.reverse()
+
+    root <> Enum.join(segments, "/")
+  end
+
+  @doc """
+  A relative path pick written in `from`, rewritten to name the same folder from `to` (as
+  `./x` or `../x`); any other pick is returned unchanged.
+  """
+  @spec rebase(String.t(), Path.t(), Path.t()) :: String.t()
+  def rebase(pick, from, to) do
+    from = Path.expand(from)
+    to = Path.expand(to)
+
+    if kind(pick) == :path and relative_path?(pick) and from != to do
+      case Path.relative_to(resolve_path(pick, from), to, force: true) do
+        "." -> "./"
+        "../" <> _ = rel -> rel
+        ".." -> "../"
+        rel -> "./" <> rel
+      end
+    else
+      pick
+    end
+  end
+
+  defp relative_path?("./" <> _), do: true
+  defp relative_path?("../" <> _), do: true
+  defp relative_path?(_), do: false
 
   @doc """
   Parses a name pick. Returns `{:ok, pick}` or `{:error, :bad_name}`.

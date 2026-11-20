@@ -55,15 +55,25 @@ defmodule SpriteProfiles.Lock do
   name  = "linear"
   ```
 
+  A path pick (`./weekend`) is recorded as a local one is, by its pick alone, with the path
+  as written; it is resolved relative to the lock's folder when the lock is read, and is
+  never pinned. A lock holding one is `format = 4`, so an older launcher asks to be
+  upgraded rather than reading the path as an address:
+
+  ```toml
+  [[picks]]
+  pick = "./weekend"
+  ```
+
   A locked launch uses the commit and never resolves the ref, the name or the version.
   Locking again resolves every pick afresh; `diff/2` says which commits and versions
   moved. A lock that cannot be read, misses a field or has a newer `format` is refused
-  (`bad_lock`). Format-1 and format-2 locks still read.
+  (`bad_lock`). Locks of formats 1 to 3 still read.
   """
 
   alias SpriteProfiles.{Address, Pick, Profile, Refusal}
 
-  @format 3
+  @format 4
   @input_name_re ~r/^[a-z][a-z0-9_]{0,30}$/
   @default_path "sprite-profiles.lock"
 
@@ -129,6 +139,7 @@ defmodule SpriteProfiles.Lock do
   def encode(entries, at \\ DateTime.utc_now(), inputs \\ %{}) do
     format =
       cond do
+        Enum.any?(entries, &(Pick.kind(&1.pick) == :path)) -> 4
         Enum.any?(entries, &(Pick.kind(&1.pick) == :name or Map.has_key?(&1, :host))) -> 3
         inputs != %{} -> 2
         true -> 1
@@ -280,6 +291,18 @@ defmodule SpriteProfiles.Lock do
 
       :name ->
         name_entry(pick, e, format)
+
+      :path ->
+        cond do
+          format < 4 ->
+            {:error, "#{pick} is a path, which a lock holds from format 4, but it says #{format}"}
+
+          map_size(e) == 1 ->
+            {:ok, %{pick: pick}}
+
+          true ->
+            {:error, "#{inspect(pick)} is a path pick, which holds only `pick`"}
+        end
     end
   end
 

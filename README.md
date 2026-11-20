@@ -157,6 +157,14 @@ sprite-profiles launch --lock sprite-profiles.lock --name demo-2
 version (`@1`), like npm's `^`. In a folder holding that file, `plan`, `lock` and `launch`
 take no picks. `lock` writes `sprite-profiles.lock` (below); commit both.
 
+A pick starting with `./`, `../`, `/` or `~/` is a path to a profile folder, so a project's
+own profile composes with published and bundled ones without changing the search path; in
+`sprite-profiles.toml` it is relative to that file's folder:
+
+```sh
+sprite-profiles launch claude-code @antialias/shop-inventory ./weekend --name demo
+```
+
 ### By address
 
 A profile can also be picked by its address, in the form GitHub Actions uses:
@@ -293,7 +301,8 @@ Some rules worth knowing before you write more:
   silently do nothing.
 
 [docs/SPEC.md](docs/SPEC.md) has every field, merge rule and refusal code. `--dir`
-(repeatable) or `SPRITE_PROFILES_PATH` (colon-separated) replaces the search path. The same
+(repeatable) or `SPRITE_PROFILES_PATH` (colon-separated) replaces the search path; a path
+pick (`./weekend`) names one folder and leaves the path alone. The same
 name found in two folders is refused, so your profile never silently shadows an example.
 
 ## Publish a profile
