@@ -2,7 +2,7 @@
 
 # sprite-profiles
 
-Pick a few profiles, and a fresh [Fly.io Sprite](https://docs.sprites.dev) gets all of them,
+Pick a few profiles, and a fresh [Fly.io Sprite](https://sprites.dev) gets all of them,
 merged by rules that refuse rather than guess.
 
 [![Latest release](https://img.shields.io/github/v/release/antialias/sprite-profiles)](https://github.com/antialias/sprite-profiles/releases/latest)

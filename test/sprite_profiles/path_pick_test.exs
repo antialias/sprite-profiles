@@ -109,6 +109,16 @@ defmodule SpriteProfiles.PathPickTest do
     assert codes(Resolver.find(["./wkend"], [], base: dir)) == [:name_mismatch]
   end
 
+  test "a checkout of a published repository, sprite-profile-NAME, holds profile NAME",
+       %{project: dir} do
+    repo = profile!(dir, "sprite-profile-hello", "hello")
+    assert {:ok, [%{name: "hello"}]} = Resolver.find(["./"], [], base: repo)
+    assert {:ok, [%{name: "hello"}]} = Resolver.find(["./sprite-profile-hello"], [], base: dir)
+
+    profile!(dir, "sprite-profile-hi", "hello")
+    assert codes(Resolver.find(["./sprite-profile-hi"], [], base: dir)) == [:name_mismatch]
+  end
+
   ## in a set
 
   test "a path pick composes with search-path profiles, which stay found", %{project: dir} do

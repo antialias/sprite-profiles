@@ -5,7 +5,7 @@ description = """
 Registers GitHub's remote MCP server (api.githubcopilot.com) in Claude Code, reached \
 through a custom API connector in your org that holds a personal access token. The \
 Sprite never sees the token: the gateway adds it. Create the connector once with \
-`mix profiles.connect -p github-mcp`, using a fine-grained token with only the \
+`sprite-profiles connect github-mcp`, using a fine-grained token with only the \
 repositories and permissions you want agents to have. Inputs choose the toolsets and \
 whether write tools are offered; the token's permissions are the real limit."""
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on a fresh Sprite by `mix profiles.launch` (milestone M2).
+# Run on a fresh Sprite by `sprite-profiles launch`.
 # Idempotent: safe to run again.
 set -euo pipefail
 

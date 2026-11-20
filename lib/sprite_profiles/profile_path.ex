@@ -78,7 +78,8 @@ defmodule SpriteProfiles.ProfilePath do
     dir = Pick.resolve_path(pick, base)
 
     if File.dir?(dir) do
-      with {:ok, profile} <- Profile.load(dir, display: pick), do: {:ok, %{profile | pick: pick}}
+      with {:ok, profile} <- Profile.load(dir, display: pick, name: folder_name(dir)),
+           do: {:ok, %{profile | pick: pick}}
     else
       {:error,
        [
@@ -88,6 +89,15 @@ defmodule SpriteProfiles.ProfilePath do
            "there is no profile folder at #{dir} (picked as #{pick}); check the path."
          )
        ]}
+    end
+  end
+
+  # A published profile's repository is named `sprite-profile-NAME`, so a checkout of one is
+  # a folder of that name, holding profile NAME: its author can pick it as `./`.
+  defp folder_name(dir) do
+    case Path.basename(dir) do
+      "sprite-profile-" <> name when name != "" -> name
+      base -> base
     end
   end
 
